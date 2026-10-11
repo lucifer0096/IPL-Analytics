@@ -91,6 +91,28 @@ ladder = 3.0 x (runs / 1000)
        + 1.0 x titles (seasons taking the field for the champion)
 ```
 
+### GOAT rankings (accolades only)
+
+A separate config, `GOAT_ACCOLADES`, ranks players by HARDWARE -- what
+the official record says a player won, never how many runs it took:
+
+```
+GOAT = 30.0 x titles        (took the field for the champion)
+     + 12.0 x finals lost   (took the field for the Final loser)
+     + 15.0 x Orange Caps   (topped the season's run aggregate)
+     + 15.0 x Purple Caps   (topped the season's wicket aggregate)
+     +  2.0 x player-of-the-match awards (official, per match)
+```
+
+Two honesty rules the rankings tab prints:
+
+- The **official IPL Most Valuable Player** is a voted prize that
+  Cricsheet does not carry, so it cannot count. Rather than invent it,
+  the tab says it is missing.
+- This app's **formula XI** is not official hardware, so it does not
+  count either -- the rankings use only awards the record itself
+  establishes.
+
 ### Season Replay (TOY model, labelled as such)
 
 - Team strength = actual points-table NRR gap through a logistic curve:

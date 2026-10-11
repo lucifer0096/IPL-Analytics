@@ -59,7 +59,8 @@ def test_app_renders_all_six_tabs():
     assert any("IPL Analytics" in str(t.value) for t in at.title)
     assert [str(t.label) for t in at.tabs] == [
         "Points Table", "Fixtures & Results", "Head-to-Head",
-        "Records & Ladder", "Player Journey", "Season Replay"]
+        "Records & Ladder", "GOAT Rankings", "Player Journey",
+        "Season Replay"]
     # Provenance + honesty captions are on screen: attribution, the
     # league-phase-only table rule, the TOY-model label, the
     # rename-merge note.
@@ -69,6 +70,10 @@ def test_app_renders_all_six_tabs():
     assert "LEAGUE PHASE ONLY" in text
     assert "TOY model, not a prediction product" in text
     assert "RENAMES only" in text
+    # The GOAT tab ranks HARDWARE and says what does NOT count: the
+    # voted MVP (absent from the data) and the app's own formula XI.
+    assert "HARDWARE only" in text
+    assert "Most Valuable Player is a voted prize" in text
 
 
 def test_latest_season_points_table_is_real():
@@ -81,6 +86,20 @@ def test_latest_season_points_table_is_real():
     assert table["NRR"].iloc[0].startswith("+")   # top team, NRR format
     # 14 league games a side in the modern format: no row exceeds it.
     assert table["P"].max() <= 19
+
+
+def test_goat_rankings_lead_with_the_hardware():
+    """The GOAT table is the 7th dataframe on the page and ranks by the
+    accolade score -- titles, finals lost, caps, PoM -- with the
+    all-time leader on top (committed-data pin: reviewed when a future
+    season legitimately reshuffles the summit)."""
+    at = _render()
+    goat = at.dataframe[6].value
+    assert list(goat.columns)[:5] == ["#", "Player", "GOAT", "Titles",
+                                      "Runner-up"]
+    assert goat["Player"].iloc[0] == "MS Dhoni"
+    assert goat["GOAT"].iloc[0] > goat["GOAT"].iloc[1] > 0
+    assert int(goat["Titles"].iloc[0]) >= 4
 
 
 def test_missing_data_files_are_an_honest_error(monkeypatch):

@@ -33,14 +33,19 @@ plain sum over the deliveries -- no ratings, no modelled form:
                           each year was played under)
 - player careers         (per-season lines and all-time totals plus the
                           published-weights all-time ladder score)
+- GOAT rankings          (accolades only: titles, finals lost, Orange /
+                          Purple Caps, official player-of-the-match
+                          awards -- weights in GOAT_ACCOLADES, never a
+                          run count)
 - season replay odds     (a clearly-labelled TOY model: P(A beats B) =
                           logistic(2 * NRR gap), 5k replays, fixed seed;
                           it is a probability lesson on the official
                           record, never a prediction product)
 
-The weights live in GOAT_WEIGHTS below: one published config, so change
-them there and both the ladder and the XI/MVP recompute, with tests
-pinning the schema.
+The weights live in GOAT_WEIGHTS (production) and GOAT_ACCOLADES
+(hardware) below: two published configs, so change them there and the
+ladder, the XI/MVP and the GOAT rankings recompute, with tests pinning
+the schema.
 
 Run `python src/collector/cricsheet.py [--zip PATH] [--no-download]` to
 (re)build the committed fallbacks data/ipl_seasons.json and
@@ -94,6 +99,18 @@ GOAT_WEIGHTS = {
     "wickets_per_50": 3.0,    # career wickets
     "player_of_match": 0.5,   # each official PoM award
     "title": 1.0,             # each IPL title won (champion team's XI)
+}
+# Published GOAT (accolades) weights -- HARDWARE only: what the official
+# record says a player won, never how many runs it took. Every weight
+# printed verbatim on the rankings tab, same one-config rule as above.
+# The official IPL "Most Valuable Player" is a voted prize absent from
+# the data, so it can never count (say so, don't invent it).
+GOAT_ACCOLADES = {
+    "title": 30.0,            # took the field for the champion
+    "runner_up": 12.0,        # took the field for the Final loser
+    "orange_cap": 15.0,       # topped the season's run aggregate
+    "purple_cap": 15.0,       # topped the season's wicket aggregate
+    "player_of_match": 2.0,   # each official PoM award
 }
 # Season MVP/XI impact: the same two scoring rates on ONE season.
 # Qualifiers keep a part-timer from topping a tiny sample.
@@ -537,10 +554,17 @@ def replay_odds(season_matches: list, seed: int = SIM_SEED,
                  for t in playoff}}
 
 
-def _career_of(lines: dict, titles: dict, poms: dict, player: str,
+def _career_of(lines: dict, honours: dict, player: str,
                name: str) -> dict:
-    """One player's all-time totals + published ladder score from his
-    season lines (weights in GOAT_WEIGHTS, printed verbatim in the app)."""
+    """One player's all-time totals + both published scores from his
+    season lines: the PRODUCTION ladder (weights in GOAT_WEIGHTS) and
+    the accolade GOAT score (hardware only, weights in GOAT_ACCOLADES).
+    `honours` maps each accolade kind to {player: count}."""
+    titles = honours["titles"]
+    runner_up = honours["runner_up"]
+    oranges = honours["orange"]
+    purples = honours["purple"]
+    poms = honours["pom"]
     seasons = {year: line for (pid, year), line in lines.items()
                if pid == player}
     agg = {"inns": 0, "runs": 0, "hs": 0, "not_outs": 0, "fours": 0,
@@ -571,11 +595,21 @@ def _career_of(lines: dict, titles: dict, poms: dict, player: str,
         + GOAT_WEIGHTS["wickets_per_50"] * agg["wickets"] / 50
         + GOAT_WEIGHTS["player_of_match"] * poms.get(player, 0)
         + GOAT_WEIGHTS["title"] * titles.get(player, 0), 2)
+    counts = {"title": titles.get(player, 0),
+              "runner_up": runner_up.get(player, 0),
+              "orange_cap": oranges.get(player, 0),
+              "purple_cap": purples.get(player, 0),
+              "player_of_match": poms.get(player, 0)}
+    goat = round(sum(GOAT_ACCOLADES[k] * n for k, n in counts.items()), 1)
     return {"name": name, "seasons": {str(y): s for y, s in
                                      sorted(seasons.items())},
             "career": {**agg, "best": agg["best"] or [0, 0]},
-            "pom": poms.get(player, 0),
-            "titles": titles.get(player, 0), "ladder": ladder}
+            "pom": counts["player_of_match"],
+            "titles": counts["title"],
+            "runner_up": counts["runner_up"],
+            "orange": counts["orange_cap"],
+            "purple": counts["purple_cap"],
+            "ladder": ladder, "goat": goat}
 
 
 def build(zip_path: str = None, out_dir: str = DATA_DIR,
@@ -591,6 +625,9 @@ def build(zip_path: str = None, out_dir: str = DATA_DIR,
     lines: dict = {}          # (player id, year) -> line
     poms: dict = {}
     titles: dict = {}
+    runner_up: dict = {}      # took the field for the Final loser
+    oranges: dict = {}        # topped a season's run aggregate
+    purples: dict = {}        # topped a season's wicket aggregate
     id_names: dict = {}       # registry id -> latest display name
     for m in matches:
         by_year.setdefault(m["year"], []).append(m)
@@ -599,26 +636,49 @@ def build(zip_path: str = None, out_dir: str = DATA_DIR,
         for who, key in (m.get("people") or {}).items():
             id_names[key] = who
         for inn in m["innings"]:
+            bat_team = inn["team"]
+            # A bowler belongs to the FIELDING side -- the innings' team
+            # is the one batting, so crediting him with it would file
+            # every bowler under the opposition (and wreck title
+            # counting for bowlers).
+            bowl_team = next((t for t in m["teams"] if t != bat_team),
+                             bat_team)
             for player, bat in (inn["bat"] or {}).items():
                 _line_accum(lines, player, id_names.get(player, player),
-                            m["year"], inn["team"], bat, None)
+                            m["year"], bat_team, bat, None)
             for player, bowl in (inn["bowl"] or {}).items():
                 _line_accum(lines, player, id_names.get(player, player),
-                            m["year"], inn["team"], None, bowl)
+                            m["year"], bowl_team, None, bowl)
     champions = {y: next((m["winner"] for m in ms
                           if m["stage"] == "Final" and m["winner"]),
                          None)
                  for y, ms in by_year.items()}
+    runner_ups_by_year = {
+        y: next((t for t in next(
+            (m["teams"] for m in ms if m["stage"] == "Final"), [])
+            if champions.get(y) and t != champions.get(y)), None)
+        for y, ms in by_year.items()}
     for (player, year), line in lines.items():
-        if champions.get(year) and team_name(line["team"]) == \
-                team_name(champions[year]):
+        team = team_name(line["team"])
+        if champions.get(year) and team == team_name(champions[year]):
             titles[player] = titles.get(player, 0) + 1
+        if runner_ups_by_year.get(year) \
+                and team == team_name(runner_ups_by_year[year]):
+            runner_up[player] = runner_up.get(player, 0) + 1
 
     seasons_payload: dict = {}
     for year in sorted(by_year):
         ms = by_year[year]
         caps = season_caps(ms, {(p, y): ln for (p, y), ln in lines.items()
                                 if y == year})
+        # The caps ARE the official Orange/Purple Cap: whoever tops the
+        # season's run / wicket aggregate wears it.
+        if caps["batting"]:
+            top = caps["batting"][0]["player"]
+            oranges[top] = oranges.get(top, 0) + 1
+        if caps["bowling"]:
+            top = caps["bowling"][0]["player"]
+            purples[top] = purples.get(top, 0) + 1
         seasons_payload[str(year)] = {
             "champion": champions.get(year),
             "points": season_table(ms),
@@ -631,8 +691,10 @@ def build(zip_path: str = None, out_dir: str = DATA_DIR,
     names = {}
     for (player, _year), line in lines.items():
         names[player] = line["name"]
+    honours = {"titles": titles, "runner_up": runner_up,
+               "orange": oranges, "purple": purples, "pom": poms}
     for player, name in names.items():
-        players_payload[player] = _career_of(lines, titles, poms,
+        players_payload[player] = _career_of(lines, honours,
                                              player, name)
     stamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     meta = {"matches": len(matches),
@@ -644,6 +706,7 @@ def build(zip_path: str = None, out_dir: str = DATA_DIR,
                    "h2h": head_to_head(matches)}
     players_doc = {"source": SOURCE, "_generated_utc": stamp,
                    "meta": meta, "ladder_weights": GOAT_WEIGHTS,
+                   "goat_weights": GOAT_ACCOLADES,
                    "players": players_payload}
     os.makedirs(out_dir, exist_ok=True)
     for name, doc in (("ipl_seasons.json", seasons_doc),

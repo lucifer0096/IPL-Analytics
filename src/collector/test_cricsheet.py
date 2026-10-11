@@ -241,6 +241,9 @@ def test_caps_extras_charging_and_wicket_credit(zip_path):
     assert bowl["yyy1"]["runs"] == 16
     assert bowl["yyy1"]["balls"] == 12
     assert caps["bowling"][0]["player"] == "xxx2"   # 1/10 before 1/12
+    # A bowler's line carries the FIELDING side: bA2 (xxx2) bowled in
+    # Beta's innings, so he played for Alpha -- not the batting team.
+    assert _lines(matches)[("xxx2", 2024)]["team"] == "Alpha"
 
 
 def _lines(matches):
@@ -250,14 +253,17 @@ def _lines(matches):
         for who, key in (m.get("people") or {}).items():
             id_names[key] = who
         for inn in m["innings"]:
+            bat_team = inn["team"]
+            bowl_team = next((t for t in m["teams"] if t != bat_team),
+                             bat_team)
             for player, bat in (inn["bat"] or {}).items():
                 cricsheet._line_accum(
                     lines, player, id_names.get(player, player),
-                    m["year"], inn["team"], bat, None)
+                    m["year"], bat_team, bat, None)
             for player, bowl in (inn["bowl"] or {}).items():
                 cricsheet._line_accum(
                     lines, player, id_names.get(player, player),
-                    m["year"], inn["team"], None, bowl)
+                    m["year"], bowl_team, None, bowl)
     return lines
 
 
@@ -275,11 +281,21 @@ def test_xi_mvp_and_ladder_weights(zip_path, monkeypatch):
     assert xi["allrounder"] is None   # nobody both batted AND bowled
     assert xi["mvp"] == "aaa1"        # 3x26/1000 > 3x1/50
     # Published ladder: A' = 3*(30/1000) + 0.5*1 PoM; B1 also a title.
+    honours = {"titles": {"bbb1": 1}, "runner_up": {"aaa1": 1},
+               "orange": {"aaa1": 1}, "purple": {"xxx2": 1},
+               "pom": {"aaa1": 1, "bbb1": 1}}
     careers = {p: cricsheet._career_of(
-        _lines(matches), {"bbb1": 1}, {"aaa1": 1, "bbb1": 1}, p, n)
+        _lines(matches), honours, p, n)
         for p, n in (("aaa1", "A1"), ("bbb1", "B1"))}
     assert careers["aaa1"]["ladder"] == 0.59
     assert careers["bbb1"]["ladder"] == 1.57      # 3x23/1000 + 0.5 + 1.0
+    # GOAT (accolades only): A1 lost the Final + wore an Orange Cap +
+    # one PoM = 12 + 15 + 2; B1 won the title + one PoM = 30 + 2.
+    assert careers["aaa1"]["goat"] == 29.0
+    assert careers["aaa1"]["runner_up"] == 1
+    assert careers["aaa1"]["orange"] == 1
+    assert careers["bbb1"]["goat"] == 32.0
+    assert careers["bbb1"]["titles"] == 1
 
 
 def test_replay_odds_reproducible_and_conservative(zip_path):
@@ -339,9 +355,17 @@ def test_build_writes_attributed_payloads(zip_path, tmp_path):
     assert seasons["meta"] == {"matches": 5, "seasons": 2, "players": 10}
     assert seasons["h2h"]["Alpha|Delhi Capitals"]["b_wins"] == 1
     assert players["ladder_weights"] == cricsheet.GOAT_WEIGHTS
+    assert players["goat_weights"] == cricsheet.GOAT_ACCOLADES
     a1 = players["players"]["aaa1"]
     assert a1["name"] == "A1"
     assert a1["career"]["runs"] == 30
     assert a1["career"]["hs"] == 15
     assert a1["pom"] == 1
+    # The Final (m2) awards the hardware the GOAT tab counts: A1's Alpha
+    # lost it (runner-up), topped the 2024 runs (Orange Cap), and B1's
+    # Beta won it (title); 2023's caps went to DD1/A2 by the same rule.
+    assert a1["runner_up"] == 1 and a1["orange"] == 1
+    assert a1["goat"] == 29.0
+    assert players["players"]["ddd1"]["orange"] == 1
+    assert players["players"]["xxx2"]["purple"] == 1
     assert built["seasons"]["meta"]["matches"] == 5

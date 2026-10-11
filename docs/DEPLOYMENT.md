@@ -16,9 +16,13 @@ no collector: it reads the committed `data/ipl_seasons.json` +
 sidebar. Pushing to `main` redeploys automatically (CI must stay green:
 `ruff`, `compileall`, and the offline suite).
 
-If the live URL redirects viewers to a Streamlit login, the app's
-access setting is not public yet: in the Cloud dashboard open
-"Manage app" -> settings and allow anyone with the link to view.
+A separate toggle from repo visibility: the app's **authentication**
+setting ("require viewers to sign in"). If it is on, every anonymous
+visitor -- browser included -- is redirected to
+`share.streamlit.io/-/auth/app` before the app loads (check with
+`curl -sI https://ipl-analytics.streamlit.app/`). Turn it off under
+"Manage app" -> settings so profile visitors land straight on the app;
+see docs.streamlit.io/deploy/streamlit-community-cloud/share-your-app/app-settings.
 
 ## (Re)deploying from scratch
 

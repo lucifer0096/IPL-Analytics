@@ -171,9 +171,12 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-tab_table, tab_fix, tab_h2h, tab_records, tab_journey, tab_replay = \
-    st.tabs(["Points Table", "Fixtures & Results", "Head-to-Head",
-             "Records & Ladder", "Player Journey", "Season Replay"])
+tab_table, tab_fix, tab_h2h, tab_records, tab_goat, tab_journey, \
+    tab_replay = st.tabs(["Points Table", "Fixtures & Results",
+                          "Head-to-Head", "Records & Ladder",
+                          "GOAT Rankings", "Player Journey",
+                          "Season Replay"])
+by_id = {pid: p["name"] for pid, p in players.items()}
 
 # --------------------------------------------------------------------------
 # Points Table
@@ -314,7 +317,6 @@ with tab_records:
     st.subheader(f"IPL {year}: formula XI & season MVP")
     xi = season.get("xi") or {}
     caps = season.get("caps") or {}
-    by_id = {pid: p["name"] for pid, p in players.items()}
 
     def chips(ids, css):
         return " ".join(
@@ -373,7 +375,7 @@ with tab_records:
         + SOURCE_LINE
     )
 
-    st.markdown("#### All-time ladder")
+    st.markdown("#### All-time ladder (production)")
     ladder = sorted(players.values(),
                     key=lambda p: -p.get("ladder", 0))[:25]
     st.dataframe(_df(
@@ -386,7 +388,56 @@ with tab_records:
           "Ladder": p["ladder"]} for p in ladder],
         ["Player", "Runs", "Wkts", "PoM", "Titles", "Ladder"]),
         hide_index=True, width="stretch")
-    st.caption(WEIGHTS_CAPTION)
+    st.caption(WEIGHTS_CAPTION + " This is the PRODUCTION ladder; the "
+                "GOAT Rankings tab ranks official accolades only.")
+
+# --------------------------------------------------------------------------
+# GOAT Rankings (accolades)
+# --------------------------------------------------------------------------
+with tab_goat:
+    st.subheader("GOAT rankings: hardware only")
+    goat_weights = players_doc.get("goat_weights") or {}
+    ranked = sorted((p for p in players.values()
+                     if p.get("goat", 0) > 0),
+                    key=lambda p: -p["goat"])[:25]
+    if not ranked:
+        st.info("No player in the record has ever won anything.")
+    else:
+        rows = []
+        for i, p in enumerate(ranked, start=1):
+            span = (f"{min(p['seasons'])}-{max(p['seasons'])}"
+                    if p.get("seasons") else "")
+            rows.append({
+                "#": i, "Player": p["name"], "GOAT": p["goat"],
+                "Titles": p["titles"], "Runner-up": p["runner_up"],
+                "Orange": p["orange"], "Purple": p["purple"],
+                "PoM": p["pom"], "Seasons": span})
+        st.dataframe(pd.DataFrame(rows), hide_index=True,
+                     width="stretch")
+        top10 = rows[:10]
+        fig = go.Figure(go.Bar(
+            y=[r["Player"] for r in top10],
+            x=[r["GOAT"] for r in top10], orientation="h",
+            marker_color="#F5C542"))
+        fig.update_layout(height=max(240, 30 * len(top10)),
+                          margin=dict(l=10, r=10, t=10, b=10),
+                          showlegend=False)
+        st.plotly_chart(fig, width="stretch", key="goat_bar_ipl")
+        st.caption(
+            "HARDWARE only -- what the official record says a player "
+            "won, never how many runs it took: "
+            f"{goat_weights.get('title', 30.0)} per title (took the "
+            f"field for the champion), "
+            f"{goat_weights.get('runner_up', 12.0)} per Final lost, "
+            f"{goat_weights.get('orange_cap', 15.0)} per Orange Cap "
+            "(topped the season's runs), "
+            f"{goat_weights.get('purple_cap', 15.0)} per Purple Cap "
+            "(topped the season's wickets), "
+            f"{goat_weights.get('player_of_match', 2.0)} per official "
+            "player-of-the-match award. The official IPL Most Valuable "
+            "Player is a voted prize Cricsheet does not carry, so it "
+            "cannot count -- and this app's formula XI is not official "
+            "hardware either, so it does not count here. " + SOURCE_LINE)
 
 # --------------------------------------------------------------------------
 # Player Journey

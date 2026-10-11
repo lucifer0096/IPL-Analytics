@@ -24,7 +24,7 @@ python src/collector/cricsheet.py --out DIR    # write elsewhere
 | File | Contents |
 | --- | --- |
 | `data/ipl_seasons.json` | source, generated-utc stamp, meta counts, `team_aliases`, per season: champion, points table (league phase), fixtures, Orange/Purple Cap tables, formula XI + MVP, replay odds; all-time `h2h` |
-| `data/ipl_players.json` | source, stamp, `ladder_weights`, registry-keyed players: per-season lines (team, batting, bowling), career totals, PoM, titles, ladder score |
+| `data/ipl_players.json` | source, stamp, `ladder_weights` + `goat_weights`, registry-keyed players: per-season lines (team, batting, bowling), career totals, PoM, titles, runner-ups, Orange/Purple Caps, ladder score, GOAT score |
 
 Both are committed because Streamlit Cloud cannot run the collector; the
 app reads only these files and stamps their `_generated_utc` in the
