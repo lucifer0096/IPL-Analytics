@@ -397,10 +397,21 @@ with tab_records:
 with tab_goat:
     st.subheader("GOAT rankings: hardware only")
     goat_weights = players_doc.get("goat_weights") or {}
-    ranked = sorted((p for p in players.values()
-                     if p.get("goat", 0) > 0),
-                    key=lambda p: -p["goat"])[:25]
-    if not ranked:
+    # A data build that predates this tab has no `goat` field at all --
+    # that must read as STALE DATA, never as "nobody won anything".
+    built_with_goat = any("goat" in p for p in players.values())
+    ranked = (sorted((p for p in players.values()
+                      if p.get("goat", 0) > 0),
+                     key=lambda p: -p["goat"])[:25]
+              if built_with_goat else [])
+    if not built_with_goat:
+        st.error(
+            "This build of data/ipl_players.json predates the GOAT "
+            "rankings (no `goat` field on any player). Rebuild with "
+            "`python src/collector/cricsheet.py` and redeploy -- an "
+            "empty table here would misrepresent the record."
+        )
+    elif not ranked:
         st.info("No player in the record has ever won anything.")
     else:
         rows = []
@@ -449,9 +460,16 @@ with tab_journey:
         st.info("No players in the record.")
     else:
         options = [p["name"] for p in roster]
-        name = st.selectbox("Player", options, key="player_ipl")
-        match = [p for p in roster if p["name"] == name]
-        if not match:
+        # No default selection: an empty box with a placeholder, and an
+        # honest prompt until a player is actually chosen.
+        name = st.selectbox("Player", options, key="player_ipl",
+                            index=None, placeholder="Choose a player...")
+        match = [p for p in roster if p["name"] == name] if name else []
+        if not name:
+            st.info("Pick a player to see his journey: every season he "
+                    "took the field, the teams across eras, runs, "
+                    "wickets and the whole career line.")
+        elif not match:
             st.info("That player vanished from the record.")
         else:
             career = match[0]["career"]

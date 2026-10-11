@@ -3,10 +3,11 @@ condition: no network, no collector, only the committed data/ipl_*.json
 files a Streamlit Cloud checkout would carry.
 
 Pins the contract that would otherwise rot silently: the page renders,
-all six tabs exist, the honest captions (Cricsheet attribution, LEAGUE
+all seven tabs exist, the honest captions (Cricsheet attribution, LEAGUE
 PHASE ONLY, TOY model) are on screen, the latest season's table is a
-real table, and a missing data file produces an honest error state
-rather than a stack trace.
+real table, Player Journey starts with no player selected, and a
+missing -- or stale, pre-GOAT -- data file produces an honest error
+state rather than a stack trace or a lie about the record.
 """
 
 import json
@@ -54,7 +55,7 @@ def test_committed_data_json_is_parseable():
                         + "\n".join(broken))
 
 
-def test_app_renders_all_six_tabs():
+def test_app_renders_all_seven_tabs():
     at = _render()
     assert any("IPL Analytics" in str(t.value) for t in at.title)
     assert [str(t.label) for t in at.tabs] == [
@@ -100,6 +101,58 @@ def test_goat_rankings_lead_with_the_hardware():
     assert goat["Player"].iloc[0] == "MS Dhoni"
     assert goat["GOAT"].iloc[0] > goat["GOAT"].iloc[1] > 0
     assert int(goat["Titles"].iloc[0]) >= 4
+
+
+def test_player_journey_starts_with_no_selection():
+    """The journey box must open EMPTY -- placeholder, no default
+    player, and the prompt visible before anything is chosen. An
+    auto-picked first player would make the tab look broken."""
+    at = _render()
+    assert not at.exception, f"page raised: {at.exception}"
+    picker = at.selectbox(key="player_ipl")
+    assert picker.value is None
+    assert "Pick a player to see his journey" in _text(at)
+
+
+def test_player_journey_renders_after_selection():
+    at = _render()
+    at.selectbox(key="player_ipl").select("MS Dhoni").run()
+    assert not at.exception, f"page raised: {at.exception}"
+    text = _text(at)
+    assert "MS Dhoni" in text
+    assert "Pick a player" not in text      # the prompt is gone
+    assert at.dataframe                    # the career table is up
+
+
+def test_stale_data_without_goat_field_is_an_honest_error(monkeypatch):
+    """A data build from before the GOAT tab (no `goat` field anywhere)
+    must say the data is stale, NOT 'nobody ever won anything' -- the
+    second reading is false, and would hide a bad deploy behind a
+    plausible-looking empty state."""
+    real_read = Path.read_text
+
+    def _stale(self, *args, **kwargs):
+        text = real_read(self, *args, **kwargs)
+        if self.name == "ipl_players.json":
+            doc = json.loads(text)
+            doc.pop("goat_weights", None)
+            for player in doc.get("players", {}).values():
+                player.pop("goat", None)
+            return json.dumps(doc)
+        return text
+
+    monkeypatch.setattr(Path, "read_text", _stale)
+    import streamlit as st  # noqa: PLC0415 - test-local cache reset
+
+    st.cache_data.clear()
+    at = AppTest.from_file(str(REPO_ROOT / "app" / "app.py"),
+                           default_timeout=60)
+    at.run()
+    assert not at.exception, f"page raised: {at.exception}"
+    text = _text(at)
+    assert "predates the GOAT rankings" in text
+    assert "cricsheet.py" in text         # how to rebuild
+    assert "No player in the record has ever won anything" not in text
 
 
 def test_missing_data_files_are_an_honest_error(monkeypatch):
