@@ -1,0 +1,10 @@
+# Exact, tested pins -- this is what CI, the collector, Streamlit Cloud and
+# a local `pip install -r requirements.txt` all install, so every
+# environment runs the same versions (Python 3.12+).
+#
+# Same pins as NBA-Analytics / FPL-Analytics (same author, same toolchain).
+# The collector itself is stdlib-only on purpose: only the app needs these.
+pandas==3.0.5
+plotly==7.1.0
+pytest==8.4.2
+streamlit==1.63.0

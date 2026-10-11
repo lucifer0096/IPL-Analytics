@@ -1,0 +1,113 @@
+"""Offline app render tests via Streamlit's AppTest -- the exact deploy
+condition: no network, no collector, only the committed data/ipl_*.json
+files a Streamlit Cloud checkout would carry.
+
+Pins the contract that would otherwise rot silently: the page renders,
+all six tabs exist, the honest captions (Cricsheet attribution, LEAGUE
+PHASE ONLY, TOY model) are on screen, the latest season's table is a
+real table, and a missing data file produces an honest error state
+rather than a stack trace.
+"""
+
+import json
+import sys
+from pathlib import Path
+
+from streamlit.testing.v1 import AppTest
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(REPO_ROOT / "src" / "collector"))
+
+
+def _render() -> AppTest:
+    at = AppTest.from_file(str(REPO_ROOT / "app" / "app.py"),
+                           default_timeout=60)
+    at.run()
+    assert not at.exception, f"page raised: {at.exception}"
+    return at
+
+
+def _text(at: AppTest) -> str:
+    """Every human-readable string the page emits: markdown, captions
+    and error boxes (the honest-empty-state paths live in the last
+    two)."""
+    parts = []
+    for name in ("markdown", "caption", "error", "info", "title"):
+        elements = getattr(at, name, None) or []
+        parts += [str(getattr(e, "value", "")) for e in elements]
+    return " ".join(parts)
+
+
+def test_committed_data_json_is_parseable():
+    """Both committed payloads must parse: conflict markers or a
+    truncated merge commit them silently and every tab would empty out.
+    One clear red naming the files beats page-level cascades."""
+    broken = []
+    for name in ("ipl_seasons.json", "ipl_players.json"):
+        path = REPO_ROOT / "data" / name
+        try:
+            json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            broken.append(f"{name}: {exc}")
+    assert not broken, ("unreadable committed data files "
+                        "(conflict markers or truncation?):\n"
+                        + "\n".join(broken))
+
+
+def test_app_renders_all_six_tabs():
+    at = _render()
+    assert any("IPL Analytics" in str(t.value) for t in at.title)
+    assert [str(t.label) for t in at.tabs] == [
+        "Points Table", "Fixtures & Results", "Head-to-Head",
+        "Records & Ladder", "Player Journey", "Season Replay"]
+    # Provenance + honesty captions are on screen: attribution, the
+    # league-phase-only table rule, the TOY-model label, the
+    # rename-merge note.
+    text = _text(at)
+    assert "Cricsheet" in text
+    assert "ODC-By" in text
+    assert "LEAGUE PHASE ONLY" in text
+    assert "TOY model, not a prediction product" in text
+    assert "RENAMES only" in text
+
+
+def test_latest_season_points_table_is_real():
+    at = _render()
+    table = at.dataframe[0].value
+    assert list(table.columns) == [
+        "#", "Team", "P", "W", "L", "T", "NR", "Pts", "NRR",
+        "Season champion"]
+    assert len(table) >= 8          # a full IPL league phase has 8+ teams
+    assert table["NRR"].iloc[0].startswith("+")   # top team, NRR format
+    # 14 league games a side in the modern format: no row exceeds it.
+    assert table["P"].max() <= 19
+
+
+def test_missing_data_files_are_an_honest_error(monkeypatch):
+    """With both payloads gone (fresh checkout before the collector ran,
+    or a bad deploy) the page must SAY SO -- an error naming the files
+    and the rebuild command, not a stack trace and not another season's
+    leftovers."""
+    real_read = Path.read_text
+
+    def _deny(self, *args, **kwargs):
+        if self.name.startswith("ipl_"):
+            raise OSError("denied for test")
+        return real_read(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", _deny)
+    # load_docs is @st.cache_data: an earlier test in this file already
+    # filled the process-wide cache with the real payloads, and a fresh
+    # AppTest run would happily reuse them instead of touching the
+    # denied paths. Clearing it is what makes this test exercise the
+    # missing-file path at all.
+    import streamlit as st  # noqa: PLC0415 - test-local cache reset
+
+    st.cache_data.clear()
+    at = AppTest.from_file(str(REPO_ROOT / "app" / "app.py"),
+                           default_timeout=60)
+    at.run()
+    assert not at.exception, f"page raised: {at.exception}"
+    text = _text(at)
+    assert "missing or unreadable" in text
+    assert "cricsheet.py" in text     # tells the operator how to rebuild

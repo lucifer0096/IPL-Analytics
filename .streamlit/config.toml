@@ -1,0 +1,14 @@
+# Deterministic theme tokens for the app's CSS (--primary-color etc.):
+# teal accent + gold, cricket-flavored but restrained.
+[theme]
+primaryColor = "#2CA6A4"
+backgroundColor = "#0E1117"
+secondaryBackgroundColor = "#1A1F2B"
+textColor = "#F0F2F6"
+base = "dark"
+
+[browser]
+gatherUsageStats = false
+
+[server]
+headless = true

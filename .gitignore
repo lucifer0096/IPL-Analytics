@@ -1,0 +1,18 @@
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+
+# Cricsheet's official zip cache (5MB, re-downloadable with conditional
+# GET from cricsheet.org) -- the collector refreshes it on demand; only the
+# built data/ipl_*.json fallbacks are committed, since Streamlit Cloud
+# cannot run the collector itself.
+.cricsheet/
+
+# Coverage output (`pytest --cov` / CI's coverage step) -- regenerated,
+# never committed.
+coverage.xml
+.coverage
