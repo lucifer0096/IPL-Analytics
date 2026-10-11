@@ -1,5 +1,10 @@
 # IPL Analytics
 
+[![CI](https://github.com/lucifer0096/IPL-Analytics/actions/workflows/ci.yml/badge.svg)](https://github.com/lucifer0096/IPL-Analytics/actions/workflows/ci.yml)
+[![Streamlit App](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://ipl-analytics.streamlit.app/)
+
+**Live app: <https://ipl-analytics.streamlit.app/>**
+
 Every IPL season from the inaugural 2008 campaign through the latest,
 built on [Cricsheet](https://cricsheet.org)'s official ball-by-ball
 record (1,243 matches, 19 seasons, 804 players -- and refreshed by

@@ -1,21 +1,30 @@
 # Deployment
 
-The app deploys on **Streamlit Community Cloud** as its own app (own
-URL, separate from any other repo's deploy).
+The app deploys on **Streamlit Community Cloud** as its own app:
 
-## Setup
+| | |
+| --- | --- |
+| Live app | <https://ipl-analytics.streamlit.app/> |
+| Repo | `lucifer0096/IPL-Analytics` (public, branch `main`) |
+| Main file path | `app/app.py` |
+| Python | 3.12+ (CI runs 3.14, matching the Cloud runtime; the pins in `requirements.txt` declare `requires-python>=3.12`) |
 
-1. Push this repo to GitHub (e.g. `lucifer0096/IPL-Analytics`).
-2. At <https://share.streamlit.io>, "Create app", pick the repo and
-   branch `main`.
-3. **Main file path: `app/app.py`** (this is the whole deploy config --
-   everything else is read from the repo).
-4. Python version: 3.12+ (the pins in `requirements.txt` declare
-   `requires-python>=3.12`; CI runs 3.14, matching the Cloud runtime).
-5. Deploy. The app needs no secrets, no network at runtime and no
-   collector: it reads the committed `data/ipl_seasons.json` +
-   `data/ipl_players.json` and stamps their generation time in the
-   sidebar.
+The whole deploy config is the main file path -- everything else is
+read from the repo. The app needs no secrets, no network at runtime and
+no collector: it reads the committed `data/ipl_seasons.json` +
+`data/ipl_players.json` and stamps their generation time in the
+sidebar. Pushing to `main` redeploys automatically (CI must stay green:
+`ruff`, `compileall`, and the offline suite).
+
+If the live URL redirects viewers to a Streamlit login, the app's
+access setting is not public yet: in the Cloud dashboard open
+"Manage app" -> settings and allow anyone with the link to view.
+
+## (Re)deploying from scratch
+
+1. At <https://share.streamlit.io>, "Create app", pick
+   `lucifer0096/IPL-Analytics` and branch `main`.
+2. Set **Main file path: `app/app.py`** and deploy.
 
 ## Refreshing data on Cloud
 
