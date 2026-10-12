@@ -20,7 +20,9 @@ plain sum over the deliveries -- no ratings, no modelled form:
                           credited the FULL quota of overs -- the
                           official IPL method)
 - season fixtures        (scores, result sentence, stage, venue and
-                          player of the match for every match)
+                          player of the match for every match; venue
+                          strings kept as published, merged for
+                          all-time views through VENUE_ALIASES)
 - season phases          (runs and legal balls per over phase --
                           powerplay 1-6, middle 7-15, death 16-20 --
                           per team, whole season)
@@ -101,6 +103,7 @@ def _phase(over_index: int) -> str:
         return "middle"
     return "death"
 
+
 # Franchise RENAMES only (same team, new name): all-time views merge via
 # this map so one franchise is one row. Successor franchises that were
 # replacements rather than renames (Deccan Chargers -> Sunrisers
@@ -111,6 +114,52 @@ TEAM_ALIASES = {
     "Delhi Daredevils": "Delhi Capitals",
     "Kings XI Punjab": "Punjab Kings",
     "Rising Pune Supergiants": "Rising Pune Supergiant",
+}
+
+# Venue RENAMES and label variants of the SAME ground -- Cricsheet
+# carries every historical spelling ("Wankhede Stadium" vs "Wankhede
+# Stadium, Mumbai", Feroz Shah Kotla vs its rename to Arun Jaitley
+# Stadium). Same policy as TEAM_ALIASES: explicit, auditable,
+# same-ground merges only; fixtures keep the venue string each match
+# was published under, all-time venue views merge through this map.
+# Every value here is itself a string Cricsheet uses, and no value is
+# ever a key (no merge chains).
+VENUE_ALIASES = {
+    "Feroz Shah Kotla": "Arun Jaitley Stadium",
+    "Arun Jaitley Stadium, Delhi": "Arun Jaitley Stadium",
+    "Sardar Patel Stadium, Motera": "Narendra Modi Stadium, Ahmedabad",
+    "OUTsurance Oval": "SuperSport Park",
+    "Subrata Roy Sahara Stadium": "Maharashtra Cricket Association Stadium",
+    "Maharashtra Cricket Association Stadium, Pune":
+        "Maharashtra Cricket Association Stadium",
+    "M.Chinnaswamy Stadium": "M Chinnaswamy Stadium",
+    "M Chinnaswamy Stadium, Bengaluru": "M Chinnaswamy Stadium",
+    "Wankhede Stadium, Mumbai": "Wankhede Stadium",
+    "Eden Gardens, Kolkata": "Eden Gardens",
+    "MA Chidambaram Stadium, Chepauk": "MA Chidambaram Stadium",
+    "MA Chidambaram Stadium, Chepauk, Chennai": "MA Chidambaram Stadium",
+    "Rajiv Gandhi International Stadium, Uppal":
+        "Rajiv Gandhi International Stadium",
+    "Rajiv Gandhi International Stadium, Uppal, Hyderabad":
+        "Rajiv Gandhi International Stadium",
+    "Dr DY Patil Sports Academy, Mumbai": "Dr DY Patil Sports Academy",
+    "Sawai Mansingh Stadium, Jaipur": "Sawai Mansingh Stadium",
+    "Brabourne Stadium, Mumbai": "Brabourne Stadium",
+    "Himachal Pradesh Cricket Association Stadium, Dharamsala":
+        "Himachal Pradesh Cricket Association Stadium",
+    "Dr. Y.S. Rajasekhara Reddy ACA-VDCA Cricket Stadium, Visakhapatnam":
+        "Dr. Y.S. Rajasekhara Reddy ACA-VDCA Cricket Stadium",
+    "Shaheed Veer Narayan Singh International Stadium, Raipur":
+        "Shaheed Veer Narayan Singh International Stadium",
+    "Maharaja Yadavindra Singh International Cricket Stadium, New Chandigarh":
+        "Maharaja Yadavindra Singh International Cricket Stadium, Mullanpur",
+    "Punjab Cricket Association IS Bindra Stadium":
+        "Punjab Cricket Association Stadium, Mohali",
+    "Punjab Cricket Association IS Bindra Stadium, Mohali":
+        "Punjab Cricket Association Stadium, Mohali",
+    "Punjab Cricket Association IS Bindra Stadium, Mohali, Chandigarh":
+        "Punjab Cricket Association Stadium, Mohali",
+    "Zayed Cricket Stadium, Abu Dhabi": "Sheikh Zayed Stadium",
 }
 
 # Published all-time ladder weights -- one config, printed verbatim
@@ -382,7 +431,9 @@ def _result_sentence(m: dict) -> str:
 
 def season_fixtures(matches: list) -> list:
     """One row per match: date, stage, both teams with innings totals
-    (overs in cricket notation), venue and the result sentence."""
+    (overs in cricket notation), venue, the result sentence and the
+    decisive-winner team (None for ties and no-results -- a Super Over
+    names its winner in the result sentence, not here)."""
     rows = []
     for m in sorted(matches, key=lambda x: (x.get("date") or "",
                                             str(x["id"]))):
@@ -396,7 +447,7 @@ def season_fixtures(matches: list) -> list:
             "id": m["id"], "date": m["date"], "stage": m["stage"],
             "teams": list(m["teams"]), "scores": scores,
             "venue": m.get("venue"), "result": _result_sentence(m),
-            "pom": m.get("pom_name"),
+            "winner": m.get("winner"), "pom": m.get("pom_name"),
         })
     return rows
 
@@ -828,6 +879,7 @@ def build(zip_path: str = None, out_dir: str = DATA_DIR,
             "players": len(players_payload)}
     seasons_doc = {"source": SOURCE, "_generated_utc": stamp,
                    "meta": meta, "team_aliases": TEAM_ALIASES,
+                   "venue_aliases": VENUE_ALIASES,
                    "seasons": seasons_payload,
                    "backtest": replay_backtest(by_year, seed),
                    "h2h": head_to_head(matches)}

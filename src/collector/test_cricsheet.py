@@ -220,6 +220,12 @@ def test_fixtures_result_sentences(zip_path):
     assert rows[1004]["result"] == "No result"
     assert rows[1001]["scores"][0] == "Alpha 17/0 (2.0)"
     assert rows[1002]["scores"][1].startswith("Beta 13/1")
+    # the winner field is the DECISIVE winner only: a Super Over tie
+    # names its winner in the result sentence, never here
+    assert rows[1001]["winner"] == "Alpha"
+    assert rows[1002]["winner"] == "Beta"
+    assert rows[1003]["winner"] is None
+    assert rows[1004]["winner"] is None
 
 
 def test_caps_extras_charging_and_wicket_credit(zip_path):
@@ -326,6 +332,25 @@ def test_phase_boundaries():
     assert [cricsheet._phase(i) for i in (0, 5)] == ["powerplay"] * 2
     assert [cricsheet._phase(i) for i in (6, 14)] == ["middle"] * 2
     assert [cricsheet._phase(i) for i in (15, 19)] == ["death"] * 2
+
+
+def test_venue_aliases_merge_same_ground_only():
+    """Same-ground merges, explicit and chain-free: no alias target is
+    itself aliased (a->b->c would drop b silently), and the known
+    rename/suffix pairs land on one canonical spelling each."""
+    va = cricsheet.VENUE_ALIASES
+    assert not (set(va.values()) & set(va))
+    assert va["Feroz Shah Kotla"] == "Arun Jaitley Stadium"
+    assert va["Arun Jaitley Stadium, Delhi"] == "Arun Jaitley Stadium"
+    assert va["Wankhede Stadium, Mumbai"] == "Wankhede Stadium"
+    assert va["Sardar Patel Stadium, Motera"] == \
+        "Narendra Modi Stadium, Ahmedabad"
+    assert va["M.Chinnaswamy Stadium"] == "M Chinnaswamy Stadium"
+    assert va["Subrata Roy Sahara Stadium"] == \
+        "Maharashtra Cricket Association Stadium"
+    assert va["Zayed Cricket Stadium, Abu Dhabi"] == "Sheikh Zayed Stadium"
+    # no key ever maps to itself (a silent no-op row)
+    assert all(k != v for k, v in va.items())
 
 
 def _pm(winner, loser, year, stage="League"):
@@ -457,3 +482,5 @@ def test_build_writes_attributed_payloads(zip_path, tmp_path):
     bt = seasons["backtest"]
     assert "PRIOR season" in bt["method"]
     assert bt["seasons"] == {} and bt["summary"]["seasons"] == 0
+    # Venue merge map rides in the payload for the app's venue views.
+    assert seasons["venue_aliases"] == cricsheet.VENUE_ALIASES

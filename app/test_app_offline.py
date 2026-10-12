@@ -3,11 +3,12 @@ condition: no network, no collector, only the committed data/ipl_*.json
 files a Streamlit Cloud checkout would carry.
 
 Pins the contract that would otherwise rot silently: the page renders,
-all seven tabs exist, the honest captions (Cricsheet attribution, LEAGUE
+all nine tabs exist, the honest captions (Cricsheet attribution, LEAGUE
 PHASE ONLY, TOY model) are on screen, the latest season's table is a
-real table, Player Journey starts with no player selected, and a
-missing -- or stale, pre-GOAT -- data file produces an honest error
-state rather than a stack trace or a lie about the record.
+real table, Player Journey starts with no player selected, the phase /
+venue / franchise views are populated and their same-ground merges
+visible, and a missing -- or stale, pre-GOAT -- data file produces an
+honest error state rather than a stack trace or a lie about the record.
 """
 
 import json
@@ -39,6 +40,17 @@ def _text(at: AppTest) -> str:
     return " ".join(parts)
 
 
+def _table(at: AppTest, first_cols: list) -> "object":
+    """The dataframe whose leading columns match, found by content:
+    inserting a tab can never silently repoint a test at the wrong
+    table the way a raw index would."""
+    for df in at.dataframe:
+        cols = list(df.value.columns)
+        if cols[:len(first_cols)] == first_cols:
+            return df.value
+    raise AssertionError(f"no dataframe starting with {first_cols}")
+
+
 def test_committed_data_json_is_parseable():
     """Both committed payloads must parse: conflict markers or a
     truncated merge commit them silently and every tab would empty out.
@@ -55,22 +67,24 @@ def test_committed_data_json_is_parseable():
                         + "\n".join(broken))
 
 
-def test_app_renders_all_seven_tabs():
+def test_app_renders_all_nine_tabs():
     at = _render()
     assert any("IPL Analytics" in str(t.value) for t in at.title)
     assert [str(t.label) for t in at.tabs] == [
-        "Points Table", "Fixtures & Results", "Head-to-Head",
-        "Records & Ladder", "GOAT Rankings", "Player Journey",
-        "Season Replay"]
+        "Points Table", "Fixtures & Results", "Season Insights",
+        "Head-to-Head", "Franchises", "Records & Ladder",
+        "GOAT Rankings", "Player Journey", "Season Replay"]
     # Provenance + honesty captions are on screen: attribution, the
     # league-phase-only table rule, the TOY-model label, the
-    # rename-merge note.
+    # rename-merge note, the phase definition and the venue merge.
     text = _text(at)
     assert "Cricsheet" in text
     assert "ODC-By" in text
     assert "LEAGUE PHASE ONLY" in text
     assert "TOY model, not a prediction product" in text
     assert "RENAMES only" in text
+    assert "powerplay = overs 1-6" in text
+    assert "same-ground label variants merged" in text
     # The GOAT tab blends two auditable components and says what does
     # NOT count: the voted MVP (absent from the data) and the app's
     # own formula XI.
@@ -80,7 +94,7 @@ def test_app_renders_all_seven_tabs():
 
 def test_latest_season_points_table_is_real():
     at = _render()
-    table = at.dataframe[0].value
+    table = _table(at, ["#", "Team"])
     assert list(table.columns) == [
         "#", "Team", "P", "W", "L", "T", "NR", "Pts", "NRR",
         "Season champion"]
@@ -91,12 +105,12 @@ def test_latest_season_points_table_is_real():
 
 
 def test_goat_rankings_blend_hardware_and_production():
-    """The GOAT table (7th dataframe) shows the blend with separate
-    Hardware / Production columns that sum to the total, ranked by it
+    """The GOAT table shows the blend with separate Hardware /
+    Production columns that sum to the total, ranked by it
     (committed-data pin: the all-time leader sits on top; reviewed when
     a future season legitimately reshuffles the summit)."""
     at = _render()
-    goat = at.dataframe[6].value
+    goat = _table(at, ["#", "Player", "GOAT"])
     assert list(goat.columns)[:7] == ["#", "Player", "GOAT", "Hardware",
                                       "Production", "Titles",
                                       "Runner-up"]
@@ -108,6 +122,69 @@ def test_goat_rankings_blend_hardware_and_production():
     assert goat["Production"].iloc[0] > 0        # career output counts
     assert goat["GOAT"].iloc[0] > goat["GOAT"].iloc[1] > 0
     assert int(goat["Titles"].iloc[0]) >= 4
+
+
+def test_season_insights_phases_and_venues():
+    """The Season Insights tab earns its place: the selected season's
+    per-team phase table, an all-time franchise rollup, and a venue
+    table whose same-ground merges are VISIBLE -- one Wankhede row,
+    not 'Wankhede Stadium' and 'Wankhede Stadium, Mumbai' split
+    apart."""
+    at = _render()
+    phases = _table(at, ["Team", "PP runs", "PP RPO"])
+    assert list(phases.columns) == [
+        "Team", "PP runs", "PP RPO", "Mid runs", "Mid RPO",
+        "Death runs", "Death RPO"]
+    assert len(phases) >= 8              # a full league phase
+    assert all(isinstance(v, (int, float)) and v > 0
+               for v in phases["PP RPO"])   # real balls, real runs
+    all_time = _table(at, ["Franchise", "PP runs"])
+    assert len(all_time) >= 14           # 15 franchises in the record
+    venues = _table(at, ["Venue", "Matches"])
+    assert list(venues.columns) == ["Venue", "Matches", "Most wins",
+                                    "Wins there"]
+    assert len(venues) == 15             # the top-15 cut
+    names = list(venues["Venue"])
+    assert "Wankhede Stadium" in names
+    assert not any(", Mumbai" in v for v in names)   # merged, not split
+    wankhede = venues[venues["Venue"] == "Wankhede Stadium"].iloc[0]
+    assert wankhede["Matches"] > 100     # both spellings counted
+    assert venues["Matches"].is_monotonic_decreasing
+
+
+def test_franchise_page_starts_empty_then_shows_the_arc():
+    """The franchise picker opens on the honest empty state (no team
+    auto-picked), and choosing one renders its season-by-season finish
+    timeline, title count, and the rename-merged all-time rivalry
+    rows."""
+    at = _render()
+    assert at.selectbox(key="team_ipl").value is None
+    assert "Pick a franchise to see its arc" in _text(at)
+    at.selectbox(key="team_ipl").select("Mumbai Indians").run()
+    assert not at.exception, f"page raised: {at.exception}"
+    arc = _table(at, ["Season", "Name that year"])
+    assert list(arc.columns) == ["Season", "Name that year", "League pos",
+                                 "P", "Pts", "NRR", "Finish"]
+    assert len(arc) >= 14               # MI has played every season
+    # MI's five titles can only ever grow, never be revoked
+    assert sum("Champions" in f for f in arc["Finish"]) >= 5
+    rivals = _table(at, ["Opponent", "Played"])
+    assert "Chennai Super Kings" in set(rivals["Opponent"])
+    assert len(rivals) >= 8
+    assert rivals["Played"].is_monotonic_decreasing
+
+
+def test_franchise_page_merges_era_names():
+    """Picking RCB (canonical name) must show BOTH names it wore: the
+    era caption, and the as-played column across seasons."""
+    at = _render()
+    at.selectbox(key="team_ipl").select("Royal Challengers Bengaluru")
+    at.run()
+    assert not at.exception, f"page raised: {at.exception}"
+    assert "Royal Challengers Bangalore" in _text(at)
+    arc = _table(at, ["Season", "Name that year"])
+    assert "Royal Challengers Bangalore" in set(arc["Name that year"])
+    assert "Royal Challengers Bengaluru" in set(arc["Name that year"])
 
 
 def test_player_journey_starts_with_no_selection():

@@ -261,6 +261,22 @@ if seasons_doc is None or players_doc is None:
 seasons = seasons_doc["seasons"]
 players = players_doc["players"]
 aliases = seasons_doc.get("team_aliases") or {}
+venue_aliases = seasons_doc.get("venue_aliases") or {}
+
+
+def canonical(team: str) -> str:
+    """Merge-alias view of a team name: franchise RENAMES only. Season
+    tables keep the names each year was played under; all-time views
+    go through this so one franchise is one row."""
+    return aliases.get(team, team)
+
+
+def canonical_venue(venue: str) -> str:
+    """Same-ground merge for venue labels: Cricsheet writes every
+    historical spelling ("Wankhede Stadium" / "Wankhede Stadium,
+    Mumbai"), fixtures keep the published string."""
+    return venue_aliases.get(venue, venue)
+
 weights = players_doc.get("ladder_weights") or {}
 WEIGHTS_CAPTION = (
     "Published weights (one config, src/collector/cricsheet.py "
@@ -304,11 +320,11 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-tab_table, tab_fix, tab_h2h, tab_records, tab_goat, tab_journey, \
-    tab_replay = st.tabs(["Points Table", "Fixtures & Results",
-                          "Head-to-Head", "Records & Ladder",
-                          "GOAT Rankings", "Player Journey",
-                          "Season Replay"])
+tab_table, tab_fix, tab_insights, tab_h2h, tab_franchise, tab_records, \
+    tab_goat, tab_journey, tab_replay = st.tabs([
+        "Points Table", "Fixtures & Results", "Season Insights",
+        "Head-to-Head", "Franchises", "Records & Ladder",
+        "GOAT Rankings", "Player Journey", "Season Replay"])
 by_id = {pid: p["name"] for pid, p in players.items()}
 
 # --------------------------------------------------------------------------
@@ -377,6 +393,109 @@ with tab_fix:
         )
 
 # --------------------------------------------------------------------------
+# Season Insights (over phases + venues)
+# --------------------------------------------------------------------------
+with tab_insights:
+    st.subheader(f"IPL {year}: phases & venues")
+
+    st.markdown("#### Over phases")
+    phases = season.get("phases") or {}
+    if not phases:
+        st.info("No phase splits in this build of the data (the payload "
+                "predates them -- rebuild with "
+                "`python src/collector/cricsheet.py`). Showing nothing "
+                "rather than zeros that would look like real cricket.")
+    else:
+        def phase_rows(by_team) -> list:
+            out = []
+            for team, ph in sorted(by_team.items()):
+                row = {"Team": team}
+                for label, key in (("PP", "powerplay"),
+                                   ("Mid", "middle"), ("Death", "death")):
+                    agg = ph.get(key) or {}
+                    runs, balls = agg.get("runs", 0), agg.get("balls", 0)
+                    row[f"{label} runs"] = runs
+                    row[f"{label} RPO"] = (round(runs / (balls / 6), 2)
+                                           if balls else "")
+                out.append(row)
+            return out
+
+        phase_cols = ["Team", "PP runs", "PP RPO", "Mid runs", "Mid RPO",
+                      "Death runs", "Death RPO"]
+        st.dataframe(_df(phase_rows(phases), phase_cols),
+                     hide_index=True, width="stretch")
+        st.caption(
+            "Phases by over faced: powerplay = overs 1-6, middle = "
+            "7-15, death = 16-20. RPO = runs per 6-ball over (legal "
+            "balls only; a wide adds runs but no ball). Whole season, "
+            "playoffs included, team names as played that year. "
+            + SOURCE_LINE
+        )
+
+        all_time: dict = {}
+        for s in seasons.values():
+            for team, ph in (s.get("phases") or {}).items():
+                bucket = all_time.setdefault(canonical(team), {})
+                for key in ("powerplay", "middle", "death"):
+                    agg = ph.get(key) or {}
+                    slot = bucket.setdefault(key,
+                                             {"runs": 0, "balls": 0})
+                    slot["runs"] += agg.get("runs", 0)
+                    slot["balls"] += agg.get("balls", 0)
+        if all_time:
+            st.markdown("#### All-time phase profile")
+            rows = []
+            for r in phase_rows(all_time):
+                row = {"Franchise": r.pop("Team")}
+                row.update(r)
+                rows.append(row)
+            st.dataframe(_df(rows, ["Franchise"] + phase_cols[1:]),
+                         hide_index=True, width="stretch")
+            st.caption(
+                "Every delivery in the record summed per franchise, "
+                "franchise renames merged (" + (
+                    "; ".join(f"{k} -> {v}" for k, v in aliases.items())
+                    if aliases else "none") + "). " + SOURCE_LINE
+            )
+
+    st.markdown("#### Venues, all history")
+    venue_stats: dict = {}
+    for s in seasons.values():
+        for f in s.get("fixtures") or []:
+            v = canonical_venue(f.get("venue") or "Unknown")
+            slot = venue_stats.setdefault(v, {"matches": 0, "wins": {}})
+            slot["matches"] += 1
+            w = f.get("winner")
+            if w:
+                w = canonical(w)
+                slot["wins"][w] = slot["wins"].get(w, 0) + 1
+    if not venue_stats:
+        st.info("No venues in the record.")
+    else:
+        top = sorted(venue_stats.items(),
+                     key=lambda kv: (-kv[1]["matches"], kv[0]))[:15]
+        rows = []
+        for v, slot in top:
+            best = (max(slot["wins"].items(),
+                        key=lambda kv: (kv[1], kv[0]))
+                    if slot["wins"] else ("-", 0))
+            rows.append({"Venue": v, "Matches": slot["matches"],
+                         "Most wins": best[0], "Wins there": best[1]})
+        st.dataframe(_df(rows, ["Venue", "Matches", "Most wins",
+                                "Wins there"]),
+                     hide_index=True, width="stretch")
+        st.caption(
+            f"Top 15 of {len(venue_stats)} grounds in the record; "
+            f"{len(venue_aliases)} same-ground label variants merged "
+            "(e.g. Feroz Shah Kotla = Arun Jaitley Stadium, "
+            "Subrata Roy Sahara Stadium = Maharashtra Cricket "
+            "Association Stadium) -- fixtures keep the string each "
+            "match was published under. Whole history, playoffs "
+            "included; ties and no-results count in Matches but award "
+            "nobody a win. " + SOURCE_LINE
+        )
+
+# --------------------------------------------------------------------------
 # Head-to-Head
 # --------------------------------------------------------------------------
 with tab_h2h:
@@ -442,6 +561,137 @@ with tab_h2h:
               "Tied": r["tied"], "No result": r["nr"]} for r in most],
             ["Pair", "Played", "Tied", "No result"]),
             hide_index=True, width="stretch")
+
+# --------------------------------------------------------------------------
+# Franchises
+# --------------------------------------------------------------------------
+with tab_franchise:
+    st.subheader("Franchise pages")
+    # every franchise under one merged name + the names it wore
+    eras: dict = {}
+    for s in seasons.values():
+        for f in s.get("fixtures") or []:
+            for t in f.get("teams") or []:
+                eras.setdefault(canonical(t), set()).add(t)
+    franchises = sorted(eras)
+    if not franchises:
+        st.info("No teams in the record.")
+    else:
+        pick = st.selectbox("Franchise", franchises, index=None,
+                            placeholder="Choose a franchise...",
+                            key="team_ipl")
+        if not pick:
+            st.info("Pick a franchise to see its arc: every season's "
+                    "finish, the title timeline, and the all-time "
+                    "record against each opponent.")
+        else:
+            if len(eras[pick]) > 1:
+                st.caption(
+                    "One franchise, names it wore in the record: "
+                    + " / ".join(sorted(eras[pick])) + "."
+                )
+            rows, title_years, playoff_years = [], [], []
+            for y in sorted(seasons, key=int):
+                s = seasons[y]
+                fx = s.get("fixtures") or []
+                mine = [f for f in fx
+                        if pick in [canonical(t)
+                                    for t in (f.get("teams") or [])]]
+                if not mine:
+                    continue
+                as_played = next(t for t in mine[0]["teams"]
+                                 if canonical(t) == pick)
+                prow = next((r for r in (s.get("points") or [])
+                             if r["team"] == as_played), None)
+                stages = {f["stage"] for f in mine}
+                champ = s.get("champion")
+                if champ and canonical(champ) == pick:
+                    finish = "\U0001F3C6 Champions"
+                    title_years.append(y)
+                elif "Final" in stages:
+                    finish = "Runner-up"
+                elif "Qualifier 2" in stages:
+                    finish = "Lost Qualifier 2"
+                elif "Semi Final" in stages:
+                    finish = "Semi-final exit"
+                elif stages & {"Eliminator", "Elimination Final"}:
+                    finish = "Lost Eliminator"
+                elif "Qualifier 1" in stages:
+                    finish = "Lost Qualifier 1"
+                else:
+                    finish = "League stage"
+                if stages - {"League"}:
+                    playoff_years.append(y)
+                rows.append({
+                    "Season": y, "Name that year": as_played,
+                    "League pos": next(
+                        (i for i, r in enumerate(s.get("points") or [], 1)
+                         if r["team"] == as_played), "-"),
+                    "P": prow["played"] if prow else "-",
+                    "Pts": prow["points"] if prow else "-",
+                    "NRR": (f"{prow['nrr']:+.3f}" if prow else "-"),
+                    "Finish": finish,
+                })
+            c1, c2, c3 = st.columns(3)
+            c1.metric("Seasons", len(rows))
+            c2.metric("Playoff seasons", len(playoff_years))
+            c3.metric("Titles", len(title_years))
+            if title_years:
+                st.markdown(
+                    "**Title timeline:** "
+                    + " ".join(
+                        f'<span class="ipl-pill ipl-pill--gold">'
+                        f'{y}</span>' for y in title_years),
+                    unsafe_allow_html=True)
+            else:
+                st.markdown("**Title timeline:** no titles in the record")
+            st.dataframe(_df(
+                rows, ["Season", "Name that year", "League pos",
+                       "P", "Pts", "NRR", "Finish"]),
+                hide_index=True, width="stretch")
+            st.caption(
+                "Every season the franchise took the field (calendar "
+                "year = year played), league position from the "
+                "league-phase-only table, finish = furthest stage "
+                "reached: Champion, Runner-up, Qualifier 2, "
+                "Qualifier 1, Eliminator (2008-2010: Semi Final), or "
+                "League stage. " + SOURCE_LINE
+            )
+            # all-time record vs each opponent: sums of the same
+            # rename-merged head-to-head rows the other tab shows
+            overall = {"p": 0, "w": 0, "l": 0, "t": 0, "nr": 0}
+            opp_rows = []
+            for r in h2h.values():
+                if r["a"] == pick:
+                    opp, win, lose = r["b"], r["a_wins"], r["b_wins"]
+                elif r["b"] == pick:
+                    opp, win, lose = r["a"], r["b_wins"], r["a_wins"]
+                else:
+                    continue
+                overall["p"] += r["played"]
+                overall["w"] += win
+                overall["l"] += lose
+                overall["t"] += r["tied"]
+                overall["nr"] += r["nr"]
+                opp_rows.append({"Opponent": opp, "Played": r["played"],
+                                 "W": win, "L": lose, "T": r["tied"],
+                                 "NR": r["nr"]})
+            opp_rows.sort(key=lambda x: (-x["Played"], x["Opponent"]))
+            st.markdown("#### All-time record")
+            o1, o2 = st.columns(2)
+            o1.metric("Matches", overall["p"])
+            o2.metric("W-L-T-NR",
+                      f"{overall['w']}-{overall['l']}-"
+                      f"{overall['t']}-{overall['nr']}")
+            st.dataframe(_df(opp_rows, ["Opponent", "Played", "W",
+                                        "L", "T", "NR"]),
+                         hide_index=True, width="stretch")
+            st.caption(
+                "All history (league + playoffs), franchise renames "
+                "merged; Super Over ties are counted under T here, "
+                "with the Super Over winner named on the Fixtures & "
+                "Results tab. " + SOURCE_LINE
+            )
 
 # --------------------------------------------------------------------------
 # Records & Ladder
