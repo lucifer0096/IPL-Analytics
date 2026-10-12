@@ -38,12 +38,13 @@ plain sum over the deliveries -- no ratings, no modelled form:
                           each year was played under)
 - player careers         (per-season lines and all-time totals plus the
                           published-weights all-time ladder score)
-- GOAT rankings          (hardware + production: titles, finals lost,
-                          Orange / Purple Caps, official player-of-
-                          the-match awards, plus career runs/wickets
-                          at the ladder's rates -- weights in
-                          GOAT_ACCOLADES, reported as two auditable
-                          subtotals per player)
+- GOAT rankings          (hardware + production, published as a 0-100
+                          index: titles, finals lost, Orange / Purple
+                          Caps, official player-of-the-match awards,
+                          plus career runs/wickets at GOAT_ACCOLADES'
+                          own rates, rescaled so the all-time leader
+                          sits at the top of the index, reported as two
+                          auditable subtotals per player)
 - season replay odds     (a clearly-labelled TOY model: P(A beats B) =
                           logistic(2 * NRR gap), 5k replays, fixed seed;
                           it is a probability lesson on the official
@@ -172,19 +173,31 @@ GOAT_WEIGHTS = {
 }
 # Published GOAT weights -- TWO auditable components in one config:
 # a HARDWARE block (what the official record says a player won) and a
-# PRODUCTION block (the ladder's own rates, so career output counts
-# too). Every weight printed verbatim on the rankings tab. The
-# official IPL "Most Valuable Player" is a voted prize absent from the
+# PRODUCTION block (career output at rates a great IPL career actually
+# reaches). Every weight printed verbatim on the rankings tab. The
+# official IPL "Most Valuable player" is a voted prize absent from the
 # data, so it can never count (say so, don't invent it).
+# The rates were fixed against three published all-time lists (ipl.com
+# Aug 2026, CricketWinner Jul 2026, SportsboardIndia Feb 2026): those
+# rank individual output first and treat team trophies as seasoning,
+# so a squad ring can never outrank a decade of runs. Calibration
+# check on this dataset: ~7000 runs and ~200 wickets both land near
+# 80-100 raw points, and the raw points are then rescaled onto the
+# 0-100 index below (a wicket is worth 16/50 = 0.32, so 200 wickets
+# matches a 7000-run career at 12.0 per 1000).
 GOAT_ACCOLADES = {
-    "title": 30.0,            # took the field for the champion
-    "runner_up": 12.0,        # took the field for the Final loser
-    "orange_cap": 15.0,       # topped the season's run aggregate
-    "purple_cap": 15.0,       # topped the season's wicket aggregate
-    "player_of_match": 2.0,   # each official PoM award (counted once)
-    "runs_per_1000": 3.0,     # production term, ladder's rate
-    "wickets_per_50": 3.0,    # production term, ladder's rate
+    "title": 6.0,             # took the field for the champion
+    "runner_up": 3.0,         # took the field for the Final loser
+    "orange_cap": 6.0,        # topped the season's run aggregate
+    "purple_cap": 6.0,        # topped the season's wicket aggregate
+    "player_of_match": 2.5,   # each official PoM award (counted once)
+    "runs_per_1000": 12.0,    # production term
+    "wickets_per_50": 16.0,   # production term
 }
+# The GOAT rating is a 0-100 INDEX: every score is rescaled so the
+# all-time leader sits exactly at the top. Raw points stay published
+# in the payload (goat_index.raw), so the rescale stays auditable.
+GOAT_INDEX_MAX = 100.0
 # Season MVP/XI impact: the same two scoring rates on ONE season.
 # Qualifiers keep a part-timer from topping a tiny sample.
 XI_BAT_MIN_INNS = 4
@@ -762,8 +775,10 @@ def _career_of(lines: dict, honours: dict, player: str,
               "purple_cap": purples.get(player, 0),
               "player_of_match": poms.get(player, 0)}
     # Hardware block (PoM counted ONCE, here) + production block (the
-    # ladder's run/wicket rates). Both subtotals round to 1dp and the
-    # total is their sum, so the columns always add up on screen.
+    # GOAT config's run/wicket rates). Both subtotals round to 1dp and
+    # the total is their sum, so the columns always add up on screen.
+    # They are RAW points here; build() rescales them onto the 0-100
+    # index once every player's raw score is known.
     hardware = round(sum(GOAT_ACCOLADES[k] * n for k, n in counts.items()),
                      1)
     production = round(
@@ -780,6 +795,22 @@ def _career_of(lines: dict, honours: dict, player: str,
             "purple": counts["purple_cap"],
             "ladder": ladder, "goat": goat,
             "goat_hardware": hardware, "goat_production": production}
+
+
+def _goat_index(players: dict) -> float:
+    """Rescale every GOAT subtotal onto the published 0-100 index:
+    one factor = GOAT_INDEX_MAX / the raw leader's score, applied to
+    BOTH subtotals (then rounded to 1dp) so Hardware + Production
+    still equals GOAT on screen. Returns the raw leader score, so the
+    payload can state where the index came from."""
+    raw_leader = max((p["goat"] for p in players.values()), default=0.0)
+    factor = GOAT_INDEX_MAX / raw_leader if raw_leader else 1.0
+    for p in players.values():
+        hardware = round(p["goat_hardware"] * factor, 1)
+        production = round(p["goat_production"] * factor, 1)
+        p["goat_hardware"], p["goat_production"] = hardware, production
+        p["goat"] = round(hardware + production, 1)
+    return raw_leader
 
 
 def build(zip_path: str = None, out_dir: str = DATA_DIR,
@@ -873,6 +904,11 @@ def build(zip_path: str = None, out_dir: str = DATA_DIR,
     for player, name in names.items():
         players_payload[player] = _career_of(lines, honours,
                                              player, name)
+    # Raw points -> published 0-100 index (the leader sits at the top);
+    # the raw leader score travels in the payload so the rescale is
+    # auditable on the rankings tab.
+    raw_leader = _goat_index(players_payload)
+    index_leader = max(players_payload.values(), key=lambda p: p["goat"])
     stamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     meta = {"matches": len(matches),
             "seasons": len(seasons_payload),
@@ -886,6 +922,9 @@ def build(zip_path: str = None, out_dir: str = DATA_DIR,
     players_doc = {"source": SOURCE, "_generated_utc": stamp,
                    "meta": meta, "ladder_weights": GOAT_WEIGHTS,
                    "goat_weights": GOAT_ACCOLADES,
+                   "goat_index": {"max": GOAT_INDEX_MAX,
+                                  "leader": index_leader["name"],
+                                  "raw": raw_leader},
                    "players": players_payload}
     os.makedirs(out_dir, exist_ok=True)
     for name, doc in (("ipl_seasons.json", seasons_doc),

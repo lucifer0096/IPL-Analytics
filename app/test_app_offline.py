@@ -113,22 +113,30 @@ def test_latest_season_points_table_is_real():
 
 def test_goat_rankings_blend_hardware_and_production():
     """The GOAT table shows the blend with separate Hardware /
-    Production columns that sum to the total, ranked by it
-    (committed-data pin: the all-time leader sits on top; reviewed when
-    a future season legitimately reshuffles the summit)."""
+    Production columns that sum to the total, ranked by the published
+    0-100 INDEX (committed-data pin: the all-time leader sits at the
+    top of the index; reviewed when a future season legitimately
+    reshuffles the summit)."""
     at = _render()
     goat = _table(at, ["#", "Player", "GOAT"])
     assert list(goat.columns)[:7] == ["#", "Player", "GOAT", "Hardware",
                                       "Production", "Titles",
                                       "Runner-up"]
-    assert goat["Player"].iloc[0] == "MS Dhoni"
+    assert goat["Player"].iloc[0] == "V Kohli"
     # The columns must add up -- that is the audit trail for the blend.
     assert abs(goat["GOAT"].iloc[0]
                - (goat["Hardware"].iloc[0]
                   + goat["Production"].iloc[0])) < 0.05
     assert goat["Production"].iloc[0] > 0        # career output counts
     assert goat["GOAT"].iloc[0] > goat["GOAT"].iloc[1] > 0
-    assert int(goat["Titles"].iloc[0]) >= 4
+    # The rating is an INDEX: the leader tops it out and nothing
+    # exceeds the published maximum.
+    assert goat["GOAT"].iloc[0] == 100.0
+    assert goat["GOAT"].max() <= 100.0
+    assert int(goat["Titles"].iloc[0]) >= 1      # Kohli: 2 titles
+    text = _text(at)
+    assert "0-100 INDEX" in text                 # the rescale is stated
+    assert "V Kohli" in text
 
 
 def test_season_insights_phases_and_venues():

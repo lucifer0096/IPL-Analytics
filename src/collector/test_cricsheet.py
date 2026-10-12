@@ -296,20 +296,47 @@ def test_xi_mvp_and_ladder_weights(zip_path, monkeypatch):
     assert careers["aaa1"]["ladder"] == 0.59
     assert careers["bbb1"]["ladder"] == 1.57      # 3x23/1000 + 0.5 + 1.0
     # GOAT = hardware + production: A1 lost the Final + wore an Orange
-    # Cap + one PoM (12+15+2) over 30 runs (3x30/1000); B1 won the
-    # title + one PoM (30+2) over 23 runs. Subtotals sum to the total.
-    assert careers["aaa1"]["goat_hardware"] == 29.0
-    assert careers["aaa1"]["goat_production"] == 0.1
-    assert careers["aaa1"]["goat"] == 29.1
+    # Cap + one PoM (3+6+2.5) over 30 runs (12x30/1000); B1 won the
+    # title + one PoM (6+2.5) over 23 runs. Subtotals sum to the total.
+    # These are the RAW points _career_of always reports; build() then
+    # rescales them onto the 0-100 index (see the build test below).
+    assert careers["aaa1"]["goat_hardware"] == 11.5
+    assert careers["aaa1"]["goat_production"] == 0.4
+    assert careers["aaa1"]["goat"] == 11.9
     assert careers["aaa1"]["runner_up"] == 1
     assert careers["aaa1"]["orange"] == 1
-    assert careers["bbb1"]["goat_hardware"] == 32.0
-    assert careers["bbb1"]["goat_production"] == 0.1
-    assert careers["bbb1"]["goat"] == 32.1
+    assert careers["bbb1"]["goat_hardware"] == 8.5
+    assert careers["bbb1"]["goat_production"] == 0.3
+    assert careers["bbb1"]["goat"] == 8.8
     assert careers["bbb1"]["titles"] == 1
     assert (careers["aaa1"]["goat_hardware"]
             + careers["aaa1"]["goat_production"]
             == careers["aaa1"]["goat"])
+
+
+def test_goat_index_rescales_onto_100():
+    """The published GOAT rating is a 0-100 index: the raw leader sits
+    at the top and BOTH subtotals scale by the same factor, so
+    Hardware + Production still equals GOAT after the rescale."""
+    players = {"aaa1": {"goat": 50.0, "goat_hardware": 40.0,
+                        "goat_production": 10.0},
+               "bbb1": {"goat": 100.0, "goat_hardware": 80.0,
+                        "goat_production": 20.0}}
+    raw = cricsheet._goat_index(players)
+    assert raw == 100.0                      # the raw leader's score
+    assert players["bbb1"]["goat"] == 100.0  # leader stays at the max
+    assert players["aaa1"]["goat"] == 50.0   # factor 1.0: nothing moves
+    # scale a 50-point leader down to the 100 cap
+    weak = {"aaa1": {"goat": 25.0, "goat_hardware": 20.0,
+                     "goat_production": 5.0},
+            "bbb1": {"goat": 50.0, "goat_hardware": 40.0,
+                     "goat_production": 10.0}}
+    cricsheet._goat_index(weak)
+    assert weak["bbb1"]["goat"] == 100.0
+    for p in weak.values():
+        assert p["goat"] == round(p["goat_hardware"] + p["goat_production"], 1)
+    # no players at all: no crash, no invented leader
+    assert cricsheet._goat_index({}) == 0.0
 
 
 def test_replay_odds_reproducible_and_conservative(zip_path):
@@ -459,10 +486,19 @@ def test_build_writes_attributed_payloads(zip_path, tmp_path):
     # lost it (runner-up), topped the 2024 runs (Orange Cap), and B1's
     # Beta won it (title); 2023's caps went to DD1/A2 by the same rule.
     assert a1["runner_up"] == 1 and a1["orange"] == 1
-    assert a1["goat_hardware"] == 29.0
-    assert a1["goat_production"] == 0.1     # 3 x 30 runs / 1000
-    assert a1["goat"] == 29.1
+    # The GOAT rating is a 0-100 INDEX: the raw leader (A1, 11.9 raw
+    # points) is rescaled to exactly 100 and every other score follows
+    # the SAME factor, so the two subtotals still sum to the total.
+    index = players["goat_index"]
+    assert index == {"max": 100.0, "leader": "A1", "raw": 11.9}
+    factor = 100.0 / index["raw"]
+    assert a1["goat_hardware"] == round(11.5 * factor, 1)   # 96.6
+    assert a1["goat_production"] == round(0.4 * factor, 1)  # 3.4
+    assert a1["goat"] == 100.0 == index["max"]
     assert a1["goat"] == a1["goat_hardware"] + a1["goat_production"]
+    # Nobody outscores the index max, and the runner-up (B1) is lower.
+    assert max(p["goat"] for p in players["players"].values()) == 100.0
+    assert players["players"]["bbb1"]["goat"] < 100.0
     assert players["players"]["ddd1"]["orange"] == 1
     assert players["players"]["xxx2"]["purple"] == 1
     assert built["seasons"]["meta"]["matches"] == 5

@@ -844,8 +844,9 @@ with tab_records:
 # GOAT Rankings (hardware + production)
 # --------------------------------------------------------------------------
 with tab_goat:
-    st.subheader("GOAT rankings: hardware + production")
+    st.subheader("GOAT index (0-100): hardware + production")
     goat_weights = players_doc.get("goat_weights") or {}
+    goat_index = players_doc.get("goat_index") or {}
     build_stamp = players_doc.get("_generated_utc", "unknown")
     # A data build older than this tab must read as STALE DATA with its
     # stamp, never as "nobody won anything" and never as blank cells:
@@ -906,23 +907,38 @@ with tab_goat:
                           margin=dict(l=10, r=10, t=10, b=10),
                           legend_orientation="h")
         st.plotly_chart(fig, width="stretch", key="goat_bar_ipl")
+        # The index rescale is stated up front (raw points -> 0-100),
+        # and a build from before the rescale says so instead of
+        # pretending its raw points are already an index.
+        leader_name = goat_index.get("leader") or "the top scorer"
+        index_line = (
+            f"GOAT is a 0-100 INDEX: raw points are rescaled so the "
+            f"all-time leader ({leader_name}) sits at "
+            f"{goat_index.get('max', 100.0)} "
+            f"(raw {goat_index.get('raw', 0)} points). "
+            if goat_index else
+            "These are raw GOAT points; this build predates the "
+            "0-100 index rescale. ")
         st.caption(
+            index_line +
             "Two auditable components, one published config "
             "(GOAT_ACCOLADES); GOAT = Hardware + Production columns. "
             "HARDWARE is what the official record says a player won: "
-            f"{goat_weights.get('title', 30.0)} per title (took the "
+            f"{goat_weights.get('title', 6.0)} per title (took the "
             f"field for the champion), "
-            f"{goat_weights.get('runner_up', 12.0)} per Final lost, "
-            f"{goat_weights.get('orange_cap', 15.0)} per Orange Cap "
+            f"{goat_weights.get('runner_up', 3.0)} per Final lost, "
+            f"{goat_weights.get('orange_cap', 6.0)} per Orange Cap "
             "(topped the season's runs), "
-            f"{goat_weights.get('purple_cap', 15.0)} per Purple Cap "
+            f"{goat_weights.get('purple_cap', 6.0)} per Purple Cap "
             "(topped the season's wickets), "
-            f"{goat_weights.get('player_of_match', 2.0)} per official "
+            f"{goat_weights.get('player_of_match', 2.5)} per official "
             "player-of-the-match award (counted once, in hardware). "
-            "PRODUCTION adds career output at the ladder's own rates: "
-            f"{goat_weights.get('runs_per_1000', 3.0)} per 1000 runs + "
-            f"{goat_weights.get('wickets_per_50', 3.0)} per 50 wickets. "
-            "The official IPL Most Valuable Player is a voted prize "
+            "PRODUCTION adds career output at the config's own rates: "
+            f"{goat_weights.get('runs_per_1000', 12.0)} per 1000 runs + "
+            f"{goat_weights.get('wickets_per_50', 16.0)} per 50 wickets "
+            "-- so a 200-wicket career matches a 7000-run one, and a "
+            "squad ring can never outrank a decade of output. The "
+            "official IPL Most Valuable Player is a voted prize "
             "Cricsheet does not carry, so it cannot count -- and this "
             "app's formula XI is not official hardware either. "
             + SOURCE_LINE)
