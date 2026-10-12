@@ -320,6 +320,67 @@ def test_replay_odds_reproducible_and_conservative(zip_path):
     assert total_title == pytest.approx(100.0)
 
 
+def test_phase_boundaries():
+    """Powerplay = overs 1-6 (0-based index 0-5), middle = 7-15
+    (6-14), death = 16-20 (15-19)."""
+    assert [cricsheet._phase(i) for i in (0, 5)] == ["powerplay"] * 2
+    assert [cricsheet._phase(i) for i in (6, 14)] == ["middle"] * 2
+    assert [cricsheet._phase(i) for i in (15, 19)] == ["death"] * 2
+
+
+def _pm(winner, loser, year, stage="League"):
+    """A parsed-shape match (what build() feeds the backtest): 20 off
+    12 balls beating 10 off 12 -- enough for season_table's NRR and
+    the backtest's schedule scan."""
+    return {"id": 1, "year": year, "teams": [winner, loser],
+            "stage": stage, "result": None, "winner": winner,
+            "innings": [
+                {"team": winner, "runs": 20, "balls": 12,
+                 "all_out": False, "bat": {}, "bowl": {}},
+                {"team": loser, "runs": 10, "balls": 12,
+                 "all_out": False, "bat": {}, "bowl": {}}]}
+
+
+def _backtest_by_year() -> dict:
+    y22, y23 = [], []
+    for loser in ("Beta", "Gamma", "Delta"):
+        y22.append(_pm("Alpha", loser, 2022))
+        y23.append(_pm("Alpha", loser, 2023))
+    y22 += [_pm("Beta", "Gamma", 2022), _pm("Gamma", "Delta", 2022),
+            _pm("Beta", "Delta", 2022)]
+    y23 += [_pm("Beta", "Gamma", 2023), _pm("Gamma", "Delta", 2023),
+            _pm("Beta", "Delta", 2023),
+            _pm("Alpha", "Omega", 2023),   # expansion side, no prior
+            _pm("Alpha", "Beta", 2023, stage="Qualifier 1"),
+            _pm("Gamma", "Delta", 2023, stage="Eliminator")]
+    return {2022: y22, 2023: y23}
+
+
+def test_replay_backtest_uses_prior_season_only():
+    """The backtest's information cutoff: strengths come from the PRIOR
+    season (Omega, new in 2023, falls back to 0.0 without raising),
+    the first season is skipped outright, and the predicted four is
+    compared with the real playoff teams (Q1 + Eliminator between them
+    name all four). Same seed, identical output."""
+    by_year = _backtest_by_year()
+    bt = cricsheet.replay_backtest(by_year, seed=7, runs=200)
+    assert set(bt["seasons"]) == {"2023"}   # 2022 has no prior season
+    row = bt["seasons"]["2023"]
+    pool = {"Alpha", "Beta", "Gamma", "Delta", "Omega"}
+    assert len(row["predicted"]) == len(set(row["predicted"])) == 4
+    assert set(row["predicted"]) <= pool
+    assert row["actual"] == ["Alpha", "Beta", "Delta", "Gamma"]
+    assert row["overlap"] == len(set(row["predicted"])
+                                 & set(row["actual"]))
+    assert bt["summary"] == {"seasons": 1,
+                             "avg_overlap": float(row["overlap"]),
+                             "exact": int(set(row["predicted"])
+                                          == set(row["actual"]))}
+    assert "PRIOR season" in bt["method"]
+    assert "No form, injuries" in bt["method"]
+    assert cricsheet.replay_backtest(by_year, seed=7, runs=200) == bt
+
+
 def test_all_out_side_is_credited_the_full_quota():
     """Official NRR rule: a side bowled out faces the FULL 20-over
     quota, not the overs it actually lasted -- so a collapse of 50 in
@@ -380,3 +441,19 @@ def test_build_writes_attributed_payloads(zip_path, tmp_path):
     assert players["players"]["ddd1"]["orange"] == 1
     assert players["players"]["xxx2"]["purple"] == 1
     assert built["seasons"]["meta"]["matches"] == 5
+    # Whole-season phase splits: every synthetic delivery sits in over
+    # 0-1, so it all lands in the powerplay (m1's 17/2 overs + m2's
+    # 12/2 for Alpha; m1's 10 + m2's 13 for Beta).
+    ph = seasons["seasons"]["2024"]["phases"]
+    assert ph["Alpha"]["powerplay"] == {"runs": 29, "balls": 24}
+    assert ph["Beta"]["powerplay"] == {"runs": 23, "balls": 25}
+    assert ph["Alpha"]["middle"] == {"runs": 0, "balls": 0}
+    assert ph["Alpha"]["death"] == {"runs": 0, "balls": 0}
+    assert seasons["seasons"]["2023"]["phases"]["Alpha"][
+        "powerplay"] == {"runs": 8, "balls": 12}
+    # Backtest payload: method printed verbatim; nothing to score on
+    # the synthetic years (2023 has no prior season, 2024's table has
+    # two teams -- under the sim's four-team minimum).
+    bt = seasons["backtest"]
+    assert "PRIOR season" in bt["method"]
+    assert bt["seasons"] == {} and bt["summary"]["seasons"] == 0

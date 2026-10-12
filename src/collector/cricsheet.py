@@ -21,6 +21,9 @@ plain sum over the deliveries -- no ratings, no modelled form:
                           official IPL method)
 - season fixtures        (scores, result sentence, stage, venue and
                           player of the match for every match)
+- season phases          (runs and legal balls per over phase --
+                          powerplay 1-6, middle 7-15, death 16-20 --
+                          per team, whole season)
 - the batting/bowling caps (most runs / most wickets: the Orange and
                           Purple Cap rule; a wicket counts for the
                           bowler unless it was a run out or retirement)
@@ -43,6 +46,9 @@ plain sum over the deliveries -- no ratings, no modelled form:
                           logistic(2 * NRR gap), 5k replays, fixed seed;
                           it is a probability lesson on the official
                           record, never a prediction product)
+- replay backtest        (same TOY model, honest cutoff: strengths from
+                          the PRIOR season's NRR only, predicted top 4
+                          vs the real playoff teams, 1k runs/season)
 
 The weights live in GOAT_WEIGHTS (the ladder) and GOAT_ACCOLADES
 (the GOAT score's hardware + production blocks) below: two published
@@ -81,6 +87,19 @@ BOWLER_NO_CREDIT = frozenset({
 })
 # The batter is NOT out (no dismissal, so averages skip him) for these.
 BATTER_NOT_OUT = frozenset({"retired hurt"})
+
+# Over phases by 0-based over index: powerplay = overs 1-6, middle =
+# 7-15, death = 16-20. Published in docs/IPL.md and printed in the
+# app's caption next to every phase number.
+PHASE_KEYS = ("powerplay", "middle", "death")
+
+
+def _phase(over_index: int) -> str:
+    if over_index <= 5:
+        return "powerplay"
+    if over_index <= 14:
+        return "middle"
+    return "death"
 
 # Franchise RENAMES only (same team, new name): all-time views merge via
 # this map so one franchise is one row. Successor franchises that were
@@ -124,6 +143,7 @@ XI_BOWL_MIN_INNS = 4
 SIM_SEED = 2026
 SIM_RUNS = 5000
 SIM_LOGISTIC_K = 2.0         # P(A beats B) = 1 / (1 + e^(-K * NRR gap))
+SIM_BACKTEST_RUNS = 1000     # per season, replay_backtest (18 seasons)
 
 
 def season_year(label) -> int:
@@ -216,27 +236,34 @@ def load_matches(zip_path: str) -> list:
 
 
 def _parse_innings(inn: dict, people: dict) -> dict:
-    """One innings -> {team, runs, balls, all_out, bat{}, bowl{}}: totals
-    plus per-batter runs/balls/out/boundaries and per-bowler balls,
-    charged runs (wides + no-balls are the bowler's, byes/leg-byes are
-    not) and credited wickets. Batting/bowling dicts key on the
-    registry's stable player id (display-name fallback), so a Cricsheet
-    spelling fix can never split a career."""
+    """One innings -> {team, runs, balls, all_out, bat{}, bowl{},
+    phases{}}: totals plus per-batter runs/balls/out/boundaries and
+    per-bowler balls, charged runs (wides + no-balls are the bowler's,
+    byes/leg-byes are not) and credited wickets, and run/ball counts per
+    over phase (powerplay/middle/death). Batting/bowling dicts key on
+    the registry's stable player id (display-name fallback), so a
+    Cricsheet spelling fix can never split a career."""
     bat: dict = {}
     bowl: dict = {}
     runs_total = 0
     legal_balls = 0
     dismissals = 0
-    for over in inn.get("overs") or []:
+    phases = {k: {"runs": 0, "balls": 0} for k in PHASE_KEYS}
+    for oi, over in enumerate(inn.get("overs") or []):
+        raw = over.get("over")
+        n = int(raw) if raw is not None else oi
+        phase = _phase(n)
         for dl in over.get("deliveries") or []:
             runs = dl.get("runs") or {}
             total = int(runs.get("total") or 0)
             bat_runs = int(runs.get("batter") or 0)
             runs_total += total
+            phases[phase]["runs"] += total
             extra = dl.get("extras") or {}
             legal = "wides" not in extra and "noballs" not in extra
             if legal:
                 legal_balls += 1
+                phases[phase]["balls"] += 1
             batter = people.get(dl.get("batter"), dl.get("batter"))
             row = bat.setdefault(batter, {"runs": 0, "balls": 0,
                                           "out": False, "fours": 0,
@@ -265,7 +292,8 @@ def _parse_innings(inn: dict, people: dict) -> dict:
                     bowl[bowler]["wickets"] += 1
     return {"team": inn.get("team"), "runs": runs_total,
             "balls": legal_balls, "fell": dismissals,
-            "all_out": dismissals >= 10, "bat": bat, "bowl": bowl}
+            "all_out": dismissals >= 10, "bat": bat, "bowl": bowl,
+            "phases": phases}
 
 
 def _overs(balls: int) -> str:
@@ -559,6 +587,81 @@ def replay_odds(season_matches: list, seed: int = SIM_SEED,
                  for t in playoff}}
 
 
+def replay_backtest(by_year: dict, seed: int = SIM_SEED,
+                    runs: int = SIM_BACKTEST_RUNS) -> dict:
+    """TOY backtest with a legitimate information cutoff: every season
+    (first excepted) is replayed with strengths taken from the PRIOR
+    season's final NRR -- a franchise with no prior season starts at
+    0.0, league average by construction -- then the predicted top four
+    (by simulated qualification rate) is compared against the four
+    teams that actually made the playoffs. Unlike the single-season
+    replay (a probability lesson on a completed table), nothing from
+    the season being replayed enters its strengths: this measures
+    genuine prior-season predictive power. Reproducible from a fixed
+    seed; no form, injuries or home advantage, same TOY label."""
+    out: dict = {}
+    years = sorted(by_year, key=int)
+    for i, year in enumerate(years):
+        if i == 0:
+            continue                     # no prior season to seed from
+        prior = {team_name(r["team"]): r["nrr"]
+                 for r in season_table(by_year[years[i - 1]])}
+        table = season_table(by_year[year])
+        if not prior or len(table) < 4:
+            continue
+        schedule = [(team_name(m["teams"][0]), team_name(m["teams"][1]))
+                    for m in by_year[year]
+                    if len(m["teams"]) == 2 and m["stage"] == "League"]
+        if not schedule:
+            continue
+        strengths = {team_name(r["team"]): prior.get(team_name(r["team"]),
+                                                     0.0)
+                     for r in table}
+        rng = random.Random(seed)
+        qualify: dict = {team_name(r["team"]): 0 for r in table}
+
+        def p_win(a, b):
+            return 1.0 / (1.0 + math.exp(
+                -SIM_LOGISTIC_K * (strengths[a] - strengths[b])))
+
+        for _ in range(runs):
+            points: dict = {team_name(r["team"]): 0 for r in table}
+            for a, b in schedule:
+                points[a if rng.random() < p_win(a, b) else b] += 2
+            order = sorted(points,
+                           key=lambda t: (-points[t], -strengths[t], t))
+            for t in order[:4]:
+                qualify[t] += 1
+        predicted = [t for t, _ in sorted(qualify.items(),
+                                          key=lambda kv: (-kv[1],
+                                                          kv[0]))][:4]
+        actual = sorted({team_name(t) for m in by_year[year]
+                         if m["stage"] != "League"
+                         for t in m["teams"]})
+        if not actual:
+            continue
+        overlap = len(set(predicted) & set(actual))
+        out[str(year)] = {"predicted": predicted, "actual": actual,
+                          "overlap": overlap}
+    overlaps = [r["overlap"] for r in out.values()]
+    exact = sum(1 for r in out.values()
+                if set(r["predicted"]) == set(r["actual"]))
+    return {
+        "method": (f"TOY backtest: strengths = PRIOR season's final NRR "
+                   f"(no prior season -> 0.0, league average by "
+                   f"construction); each LEAGUE match of the season "
+                   f"simulated {runs} times from seed {seed}, predicted "
+                   f"top 4 by qualification rate, compared with the "
+                   f"teams that actually reached the playoffs. No form, "
+                   f"injuries or home advantage; no information from "
+                   f"the season being replayed enters its strengths."),
+        "runs": runs, "seed": seed, "seasons": out,
+        "summary": {"seasons": len(out),
+                    "avg_overlap": (round(sum(overlaps) / len(overlaps),
+                                           2) if overlaps else 0.0),
+                    "exact": exact}}
+
+
 def _career_of(lines: dict, honours: dict, player: str,
                name: str) -> dict:
     """One player's all-time totals + both published scores from his
@@ -645,6 +748,7 @@ def build(zip_path: str = None, out_dir: str = DATA_DIR,
     oranges: dict = {}        # topped a season's run aggregate
     purples: dict = {}        # topped a season's wicket aggregate
     id_names: dict = {}       # registry id -> latest display name
+    phase_totals: dict = {}   # year -> team (as played) -> phase -> agg
     for m in matches:
         by_year.setdefault(m["year"], []).append(m)
         if m.get("pom"):
@@ -665,6 +769,11 @@ def build(zip_path: str = None, out_dir: str = DATA_DIR,
             for player, bowl in (inn["bowl"] or {}).items():
                 _line_accum(lines, player, id_names.get(player, player),
                             m["year"], bowl_team, None, bowl)
+            bucket = phase_totals.setdefault(m["year"], {}).setdefault(
+                bat_team, {k: {"runs": 0, "balls": 0} for k in PHASE_KEYS})
+            for pname, agg in (inn.get("phases") or {}).items():
+                bucket[pname]["runs"] += agg["runs"]
+                bucket[pname]["balls"] += agg["balls"]
     champions = {y: next((m["winner"] for m in ms
                           if m["stage"] == "Final" and m["winner"]),
                          None)
@@ -701,6 +810,7 @@ def build(zip_path: str = None, out_dir: str = DATA_DIR,
             "fixtures": season_fixtures(ms),
             "caps": caps,
             "xi": season_xi(caps),
+            "phases": phase_totals.get(year, {}),
             "sim": replay_odds(ms, seed, runs),
         }
     players_payload = {}
@@ -719,6 +829,7 @@ def build(zip_path: str = None, out_dir: str = DATA_DIR,
     seasons_doc = {"source": SOURCE, "_generated_utc": stamp,
                    "meta": meta, "team_aliases": TEAM_ALIASES,
                    "seasons": seasons_payload,
+                   "backtest": replay_backtest(by_year, seed),
                    "h2h": head_to_head(matches)}
     players_doc = {"source": SOURCE, "_generated_utc": stamp,
                    "meta": meta, "ladder_weights": GOAT_WEIGHTS,
