@@ -212,8 +212,10 @@ Titans.
 Cricsheet writes every historical spelling of a ground; all-time venue
 views merge them through `VENUE_ALIASES` (same policy as team renames:
 explicit, auditable, same-ground only, no chains -- fixtures keep the
-string each match was published under). Examples: "Wankhede Stadium" =
-"Wankhede Stadium, Mumbai"; "Feroz Shah Kotla" was renamed **Arun
+string each match was published under). The current record has 60
+published venue strings; 25 alias entries collapse them to 35 grounds,
+18 of which carried two or more spellings. Examples: "Wankhede Stadium"
+= "Wankhede Stadium, Mumbai"; "Feroz Shah Kotla" was renamed **Arun
 Jaitley Stadium**; "Sardar Patel Stadium, Motera" was rebuilt as
 **Narendra Modi Stadium, Ahmedabad**; "Subrata Roy Sahara Stadium" =
 Maharashtra Cricket Association Stadium (sponsor name); "OUTsurance
@@ -221,9 +223,8 @@ Oval" = SuperSport Park (2009 mixed both); "Zayed Cricket Stadium, Abu
 Dhabi" = Sheikh Zayed Stadium; the four PCA Mohali spellings; and the
 city-suffix variants of Eden Gardens, Chinnaswamy (punctuation too),
 Chepauk, Rajiv Gandhi/Uppal, DY Patil, Sawai Mansingh, Brabourne,
-HPCA Dharamsala, ACA-VDCA, Raipur and Mullanpur/New Chandigarh.
-26 aliases cover 19 grounds; ties and no-results count in a venue's
-match count but award nobody a win.
+HPCA Dharamsala, ACA-VDCA, Raipur and Mullanpur/New Chandigarh. Ties
+and no-results count in a venue's match count but award nobody a win.
 
 ## What is honestly absent
 
