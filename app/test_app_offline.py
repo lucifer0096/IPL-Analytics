@@ -3,12 +3,14 @@ condition: no network, no collector, only the committed data/ipl_*.json
 files a Streamlit Cloud checkout would carry.
 
 Pins the contract that would otherwise rot silently: the page renders,
-all nine tabs exist, the honest captions (Cricsheet attribution, LEAGUE
+all ten tabs exist, the honest captions (Cricsheet attribution, LEAGUE
 PHASE ONLY, TOY model) are on screen, the latest season's table is a
-real table, Player Journey starts with no player selected, the phase /
-venue / franchise views are populated and their same-ground merges
-visible, and a missing -- or stale, pre-GOAT -- data file produces an
-honest error state rather than a stack trace or a lie about the record.
+real table, Player Journey starts with no player selected (and the two
+players sharing one display name are BOTH selectable), the phase /
+venue / franchise / compare / milestone / backtest views are populated
+with their same-ground merges visible, and a missing -- or stale,
+pre-GOAT -- data file produces an honest error state rather than a
+stack trace or a lie about the record.
 """
 
 import json
@@ -40,15 +42,19 @@ def _text(at: AppTest) -> str:
     return " ".join(parts)
 
 
-def _table(at: AppTest, first_cols: list) -> "object":
-    """The dataframe whose leading columns match, found by content:
+def _table(at: AppTest, first_cols: list, nth: int = 0) -> "object":
+    """The nth dataframe whose leading columns match, found by content:
     inserting a tab can never silently repoint a test at the wrong
     table the way a raw index would."""
+    hits = []
     for df in at.dataframe:
         cols = list(df.value.columns)
         if cols[:len(first_cols)] == first_cols:
-            return df.value
-    raise AssertionError(f"no dataframe starting with {first_cols}")
+            hits.append(df.value)
+    if len(hits) <= nth:
+        raise AssertionError(f"no dataframe #{nth} starting "
+                             f"with {first_cols} ({len(hits)} found)")
+    return hits[nth]
 
 
 def test_committed_data_json_is_parseable():
@@ -67,13 +73,14 @@ def test_committed_data_json_is_parseable():
                         + "\n".join(broken))
 
 
-def test_app_renders_all_nine_tabs():
+def test_app_renders_all_ten_tabs():
     at = _render()
     assert any("IPL Analytics" in str(t.value) for t in at.title)
     assert [str(t.label) for t in at.tabs] == [
         "Points Table", "Fixtures & Results", "Season Insights",
         "Head-to-Head", "Franchises", "Records & Ladder",
-        "GOAT Rankings", "Player Journey", "Season Replay"]
+        "GOAT Rankings", "Player Journey", "Compare",
+        "Season Replay"]
     # Provenance + honesty captions are on screen: attribution, the
     # league-phase-only table rule, the TOY-model label, the
     # rename-merge note, the phase definition and the venue merge.
@@ -185,6 +192,89 @@ def test_franchise_page_merges_era_names():
     arc = _table(at, ["Season", "Name that year"])
     assert "Royal Challengers Bangalore" in set(arc["Name that year"])
     assert "Royal Challengers Bengaluru" in set(arc["Name that year"])
+
+
+def test_compare_tab_puts_careers_side_by_side():
+    """Compare opens empty (both pickers unselected), and picking two
+    players renders the metric frame with an auditable GOAT sum on
+    each side plus both season overlays."""
+    at = _render()
+    assert at.selectbox(key="compare_a_ipl").value is None
+    assert at.selectbox(key="compare_b_ipl").value is None
+    assert ("Pick two players to put their careers side by side"
+            in _text(at))
+    at.selectbox(key="compare_a_ipl").select("V Kohli").run()
+    at.selectbox(key="compare_b_ipl").select("MS Dhoni").run()
+    assert not at.exception, f"page raised: {at.exception}"
+    pair = _table(at, ["Metric", "V Kohli", "MS Dhoni"])
+    by = {m: (pair["V Kohli"].iloc[i], pair["MS Dhoni"].iloc[i])
+          for i, m in enumerate(pair["Metric"])}
+    # 9,346 against 5,439 in the current record (reviewed when a
+    # future season legitimately reshuffles career runs)
+    assert int(by["Runs"][0]) > int(by["Runs"][1])
+    assert int(by["Titles"][1]) >= 4
+    for col in ("V Kohli", "MS Dhoni"):
+        total = float(pair[col][pair["Metric"] == "GOAT total"].iloc[0])
+        hw = float(pair[col][pair["Metric"] == "GOAT hardware"].iloc[0])
+        prod = float(pair[col][
+            pair["Metric"] == "GOAT production"].iloc[0])
+        assert abs(total - (hw + prod)) < 0.05
+    # both season overlays joined the standing three charts (H2H bar,
+    # GOAT stack, replay bar)
+    charts = {c.key for c in at.get("plotly_chart")}
+    assert {"compare_runs_ipl", "compare_wkts_ipl"} <= charts
+
+
+def test_milestones_show_the_gap_not_a_projection():
+    """The Records tab's milestone tables: the next round number above
+    each active player's total, closest first (top 10), framed as a
+    gap rather than a forecast."""
+    at = _render()
+    runs = _table(at, ["Player", "Has", "Milestone", "Needs"])
+    assert list(runs.columns) == ["Player", "Has", "Milestone", "Needs"]
+    assert len(runs) == 10                     # closest chasers only
+    assert runs["Needs"].is_monotonic_increasing   # closest first
+    assert all(1 <= int(n) <= 1000 for n in runs["Needs"])  # rounds only
+    assert min(int(n) for n in runs["Needs"]) <= 25
+    wkts = _table(at, ["Player", "Has", "Milestone", "Needs"], nth=1)
+    assert len(wkts) == 10
+    assert min(int(n) for n in wkts["Needs"]) <= 25
+    assert all(1 <= int(n) <= 50 for n in wkts["Needs"])
+    text = _text(at)
+    assert "A GAP, not a projection" in text
+    assert "latest season in the record" in text
+
+
+def test_replay_backtest_shows_its_information_cutoff():
+    """The Replay tab's backtest table: every replayed season with its
+    predicted vs actual playoff four, the printed PRIOR-season method,
+    and the summary metrics."""
+    at = _render()
+    bt = _table(at, ["Season", "Predicted top 4"])
+    assert list(bt.columns) == ["Season", "Predicted top 4",
+                                "Actually reached playoffs", "Overlap"]
+    assert len(bt) >= 15            # one row per replayed season
+    assert all(str(v).endswith("/4") for v in bt["Overlap"])
+    text = _text(at)
+    assert "PRIOR season" in text           # the method, verbatim
+    assert "blind spot" in text             # the honest weakness
+
+
+def test_duplicate_display_names_are_selectable():
+    """Two real players share the display name Harmeet Singh: the
+    picker offers both with their spans, and the journey shows the one
+    actually chosen -- not whichever sorted first."""
+    at = _render()
+    labels = at.selectbox(key="player_ipl").options
+    dup = [x for x in labels if x.startswith("Harmeet Singh (")]
+    assert len(dup) == 2
+    single = next(x for x in dup if "2013-2013" in x)
+    at.selectbox(key="player_ipl").select(single).run()
+    assert not at.exception, f"page raised: {at.exception}"
+    text = _text(at)
+    assert "Harmeet Singh" in text
+    assert "2013 to 2013" in text
+    assert "2009 to 2013" not in text   # not the OTHER Harmeet Singh
 
 
 def test_player_journey_starts_with_no_selection():

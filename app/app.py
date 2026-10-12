@@ -143,6 +143,25 @@ def _df(rows: list, cols: list) -> pd.DataFrame:
     return frame[cols]
 
 
+def _player_options(roster: list) -> dict:
+    """Unique picker label -> player, shared by both player tabs. The
+    record holds two real players called Harmeet Singh, and a
+    name-only selectbox resolves a duplicate to whichever sorted first
+    (silently showing the wrong career). Duplicates get the season
+    span appended so both stay selectable."""
+    counts: dict = {}
+    for p in roster:
+        counts[p["name"]] = counts.get(p["name"], 0) + 1
+    out: dict = {}
+    for p in sorted(roster, key=lambda p: p["name"]):
+        label = p["name"]
+        if counts[label] > 1 and p.get("seasons"):
+            label = (f"{p['name']} ({min(p['seasons'])}"
+                     f"-{max(p['seasons'])})")
+        out[label] = p
+    return out
+
+
 # Presentational only -- franchise brand colours for the player card's
 # generated avatar. No photos exist in the record (Cricsheet carries
 # ball-by-ball data, not images) and headshots are other people's
@@ -321,10 +340,11 @@ st.markdown(
 )
 
 tab_table, tab_fix, tab_insights, tab_h2h, tab_franchise, tab_records, \
-    tab_goat, tab_journey, tab_replay = st.tabs([
+    tab_goat, tab_journey, tab_compare, tab_replay = st.tabs([
         "Points Table", "Fixtures & Results", "Season Insights",
         "Head-to-Head", "Franchises", "Records & Ladder",
-        "GOAT Rankings", "Player Journey", "Season Replay"])
+        "GOAT Rankings", "Player Journey", "Compare",
+        "Season Replay"])
 by_id = {pid: p["name"] for pid, p in players.items()}
 
 # --------------------------------------------------------------------------
@@ -774,6 +794,52 @@ with tab_records:
     st.caption(WEIGHTS_CAPTION + " This is the PRODUCTION ladder; the "
                 "GOAT Rankings tab blends hardware + production.")
 
+    st.markdown("#### Milestones within reach")
+    latest = max(int(y) for y in seasons)
+    active = [p for p in players.values()
+              if p.get("seasons")
+              and max(int(y) for y in p["seasons"]) == latest]
+    run_rows, wkt_rows = [], []
+    for p in active:
+        c = p["career"]
+        nxt = next((m for m in range(1000, 10001, 1000)
+                    if m > c["runs"]), None)
+        if nxt:
+            run_rows.append({"Player": p["name"], "Has": c["runs"],
+                             "Milestone": f"{nxt:,}",
+                             "Needs": nxt - c["runs"]})
+        nxt = next((m for m in range(50, 301, 50)
+                    if m > c["wickets"]), None)
+        if nxt:
+            wkt_rows.append({"Player": p["name"], "Has": c["wickets"],
+                             "Milestone": f"{nxt}",
+                             "Needs": nxt - c["wickets"]})
+    if not run_rows and not wkt_rows:
+        st.info("No player active in the latest season is within reach "
+                "of a round career number in this build.")
+    else:
+        col_r, col_w = st.columns(2)
+        cols = ["Player", "Has", "Milestone", "Needs"]
+        with col_r:
+            st.markdown("**Runs**")
+            st.dataframe(_df(
+                sorted(run_rows, key=lambda r: r["Needs"])[:10], cols),
+                hide_index=True, width="stretch")
+        with col_w:
+            st.markdown("**Wickets**")
+            st.dataframe(_df(
+                sorted(wkt_rows, key=lambda r: r["Needs"])[:10], cols),
+                hide_index=True, width="stretch")
+        st.caption(
+            f"Players who took the field in {latest}, the latest "
+            "season in the record, ordered by how close they sit to "
+            "the next round career number: runs to the next thousand "
+            "up to 10,000, wickets to the next 50 up to 300 (a player "
+            "past the top rung has no row). A GAP, not a projection: "
+            "no batting pace, games left or fitness is assumed. "
+            + SOURCE_LINE
+        )
+
 # --------------------------------------------------------------------------
 # GOAT Rankings (hardware + production)
 # --------------------------------------------------------------------------
@@ -870,19 +936,20 @@ with tab_journey:
     if not roster:
         st.info("No players in the record.")
     else:
-        options = [p["name"] for p in roster]
+        opts = _player_options(roster)
         # No default selection: an empty box with a placeholder, and an
         # honest prompt until a player is actually chosen.
-        name = st.selectbox("Player", options, key="player_ipl",
-                            index=None, placeholder="Choose a player...")
-        match = [p for p in roster if p["name"] == name] if name else []
-        if not name:
+        label = st.selectbox("Player", list(opts), key="player_ipl",
+                             index=None, placeholder="Choose a player...")
+        if not label:
             st.info("Pick a player to see his journey: every season he "
                     "took the field, the teams across eras, runs, "
                     "wickets and the whole career line.")
-        elif not match:
+        elif label not in opts:
             st.info("That player vanished from the record.")
         else:
+            match = [opts[label]]
+            name = match[0]["name"]
             career = match[0]["career"]
             # The card replaces the old metric row: avatar, span, team,
             # and every published number (career, hardware, ladder, the
@@ -918,7 +985,8 @@ with tab_journey:
                 played = list(lines.items())
                 teams_played = sorted({ln["team"] for _, ln in played})
                 sentence = (
-                    f"{name}: {len(played)} seasons in the record "
+                    f"{name}: {len(played)} season"
+                    f"{'s' if len(played) != 1 else ''} in the record "
                     f"({played[0][0]} to {played[-1][0]}), turning out "
                     f"for {' / '.join(teams_played)}.")
                 if career["balls"]:
@@ -932,6 +1000,112 @@ with tab_journey:
                     "ball-by-ball record; a dash means he did not bat or "
                     "bowl that season. " + WEIGHTS_CAPTION
                 )
+
+# --------------------------------------------------------------------------
+# Compare (two players, side by side)
+# --------------------------------------------------------------------------
+with tab_compare:
+    st.subheader("Compare two players")
+    roster_c = sorted(players.values(), key=lambda p: p["name"])
+    if not roster_c:
+        st.info("No players in the record.")
+    else:
+        opts = _player_options(roster_c)
+        labels = list(opts)
+        col_a, col_b = st.columns(2)
+        with col_a:
+            a_label = st.selectbox("Player A", labels, index=None,
+                                   placeholder="Choose a player...",
+                                   key="compare_a_ipl")
+        with col_b:
+            b_label = st.selectbox("Player B", labels, index=None,
+                                   placeholder="Choose a player...",
+                                   key="compare_b_ipl")
+        if not a_label or not b_label:
+            st.info("Pick two players to put their careers side by "
+                    "side: season-by-season output, honours, ladder "
+                    "and GOAT score.")
+        elif a_label == b_label:
+            st.info("Pick two DIFFERENT players to compare.")
+        else:
+            a, b = opts[a_label], opts[b_label]
+
+            def metrics(p: dict) -> list:
+                c = p["career"]
+                seasons = p.get("seasons") or {}
+                span = (f"{min(seasons)}-{max(seasons)}"
+                        if seasons else "-")
+                return [
+                    ("Seasons played", len(seasons)),
+                    ("Span", span),
+                    ("Runs", c["runs"]),
+                    ("Highest score", c["hs"]),
+                    ("Batting strike rate",
+                     (round(100.0 * c["runs"] / c["balls"], 1)
+                      if c["balls"] else "-")),
+                    ("Fifties / hundreds",
+                     f"{c['fifties']} / {c['hundreds']}"),
+                    ("Wickets", c["wickets"]),
+                    ("Best bowling",
+                     (f"{c['best'][0]}/{c['best'][1]}"
+                      if c.get("best") else "-")),
+                    ("Player of the match awards", p["pom"]),
+                    ("Titles", p["titles"]),
+                    ("Runner-up finishes", p["runner_up"]),
+                    ("Orange Caps", p["orange"]),
+                    ("Purple Caps", p["purple"]),
+                    ("Ladder (production)", p["ladder"]),
+                    ("GOAT hardware", p.get("goat_hardware", "-")),
+                    ("GOAT production", p.get("goat_production", "-")),
+                    ("GOAT total", p.get("goat", "-")),
+                ]
+
+            ma, mb = dict(metrics(a)), dict(metrics(b))
+            # Every cell a string: a column mixing ints with the span
+            # ("2008-2026") would make pyarrow choke on st.dataframe.
+            st.dataframe(_df(
+                [{"Metric": k, a_label: str(ma[k]), b_label: str(mb[k])}
+                 for k, _ in metrics(a)],
+                ["Metric", a_label, b_label]),
+                hide_index=True, width="stretch")
+
+            def series(p: dict, part: str, field: str) -> tuple:
+                lines = p.get("seasons") or {}
+                ys = sorted(lines, key=int)
+                return ([int(y) for y in ys],
+                        [lines[y][part][field] for y in ys])
+
+            for heading, part, field, ckey in (
+                    ("Runs by season", "batting", "runs",
+                     "compare_runs_ipl"),
+                    ("Wickets by season", "bowling", "wickets",
+                     "compare_wkts_ipl")):
+                fig = go.Figure()
+                for p, nm, color in ((a, a_label, "#2CA6A4"),
+                                     (b, b_label, "#F5C542")):
+                    xs, ys = series(p, part, field)
+                    fig.add_trace(go.Scatter(
+                        x=xs, y=ys, mode="lines+markers", name=nm,
+                        line=dict(color=color, width=2)))
+                fig.update_layout(
+                    height=280, margin=dict(l=10, r=10, t=24, b=10),
+                    xaxis=dict(dtick=1, title="Season"),
+                    yaxis_title=heading.split()[0],
+                    legend=dict(orientation="h", y=1.14))
+                st.markdown(f"**{heading}**")
+                st.plotly_chart(fig, width="stretch", key=ckey)
+            shared = sorted(set(a.get("seasons") or {})
+                            & set(b.get("seasons") or {}), key=int)
+            st.caption(
+                (("Both took the field in " + ", ".join(shared) + ". ")
+                 if shared else
+                 "No season in common in the record. ")
+                + "One line per player, per-season totals as recorded "
+                "(a season he missed is not a point -- the line spans "
+                "it). "
+                "GOAT total = hardware + production, the two auditable "
+                "subtotals the GOAT tab ranks on. " + SOURCE_LINE
+            )
 
 # --------------------------------------------------------------------------
 # Season Replay (TOY model)
@@ -981,5 +1155,41 @@ with tab_replay:
             "the real IPL knockout format (Qualifier 1, Eliminator, "
             "Qualifier 2, Final). No form, injuries or home advantage "
             f"enter. The replay's favorite finished {verdict}. "
+            + SOURCE_LINE
+        )
+
+    st.markdown("#### Backtest: prior-season strengths vs reality")
+    bt = seasons_doc.get("backtest")
+    if not bt or not bt.get("seasons"):
+        st.info(
+            "This build of the data predates the replay backtest (or "
+            "no season in it has a prior season to seed from). "
+            "Data build stamp: "
+            f"{seasons_doc.get('_generated_utc', 'unknown')}."
+        )
+    else:
+        st.markdown(f"**{bt.get('method')}**")
+        rows = [{"Season": y,
+                 "Predicted top 4": ", ".join(r["predicted"]),
+                 "Actually reached playoffs": ", ".join(r["actual"]),
+                 "Overlap": f"{r['overlap']}/4"}
+                for y, r in sorted(bt["seasons"].items(),
+                                   key=lambda kv: int(kv[0]))]
+        st.dataframe(_df(rows, ["Season", "Predicted top 4",
+                                "Actually reached playoffs", "Overlap"]),
+                     hide_index=True, width="stretch")
+        summary = bt.get("summary") or {}
+        b1, b2, b3 = st.columns(3)
+        b1.metric("Seasons replayed", summary.get("seasons", 0))
+        b2.metric("Average overlap",
+                  f"{summary.get('avg_overlap', 0):.2f} / 4")
+        b3.metric("Exact top fours", summary.get("exact", 0))
+        st.caption(
+            "The single-season replay above is seeded from the very "
+            "table it replays; this backtest is not -- each season "
+            "sees only the PRIOR season's final NRR. Read the average "
+            "overlap: 4 would mean prior form always picks the "
+            "playoffs, 0 never. Expansion seasons are the known blind "
+            "spot -- no prior table contains the new franchises. "
             + SOURCE_LINE
         )
