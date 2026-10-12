@@ -91,20 +91,29 @@ ladder = 3.0 x (runs / 1000)
        + 1.0 x titles (seasons taking the field for the champion)
 ```
 
-### GOAT rankings (accolades only)
+### GOAT rankings (hardware + production)
 
-A separate config, `GOAT_ACCOLADES`, ranks players by HARDWARE -- what
-the official record says a player won, never how many runs it took:
+A separate config, `GOAT_ACCOLADES`, ranks players on two auditable
+blocks that the tab shows as separate columns summing to the score:
 
 ```
-GOAT = 30.0 x titles        (took the field for the champion)
+GOAT = HARDWARE
+     + 30.0 x titles        (took the field for the champion)
      + 12.0 x finals lost   (took the field for the Final loser)
      + 15.0 x Orange Caps   (topped the season's run aggregate)
      + 15.0 x Purple Caps   (topped the season's wicket aggregate)
-     +  2.0 x player-of-the-match awards (official, per match)
+     +  2.0 x player-of-the-match awards (official, counted once)
+     + PRODUCTION           (the ladder's own rates)
+     +  3.0 x (runs / 1000)
+     +  3.0 x (wickets / 50)
 ```
 
-Two honesty rules the rankings tab prints:
+Hardware leads (the production block reuses the ladder's small rates,
+so a title still outruns a season of runs), but career output is never
+worth zero: 9,346 runs should move a player, and the columns let a
+reader check every point of the blend.
+
+Three honesty rules the rankings tab prints:
 
 - The **official IPL Most Valuable Player** is a voted prize that
   Cricsheet does not carry, so it cannot count. Rather than invent it,
@@ -112,6 +121,17 @@ Two honesty rules the rankings tab prints:
 - This app's **formula XI** is not official hardware, so it does not
   count either -- the rankings use only awards the record itself
   establishes.
+- Player-of-the-match is counted **once** (in hardware), not twice.
+
+### Player card (generated avatar)
+
+Cricsheet carries ball-by-ball data, no photos, and real cricket
+headshots are other people's copyright -- so the Journey tab draws a
+trading-card style player card instead: the player's initials on a
+gradient in his last team's brand colours (a stable hash-derived hue
+for anything unlisted), his season span and last team, and every
+published number as chips: career, hardware counts, ladder and the
+GOAT blend with both subtotals spelled out on the card.
 
 ### Season Replay (TOY model, labelled as such)
 

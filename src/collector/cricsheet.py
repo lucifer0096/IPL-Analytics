@@ -33,19 +33,21 @@ plain sum over the deliveries -- no ratings, no modelled form:
                           each year was played under)
 - player careers         (per-season lines and all-time totals plus the
                           published-weights all-time ladder score)
-- GOAT rankings          (accolades only: titles, finals lost, Orange /
-                          Purple Caps, official player-of-the-match
-                          awards -- weights in GOAT_ACCOLADES, never a
-                          run count)
+- GOAT rankings          (hardware + production: titles, finals lost,
+                          Orange / Purple Caps, official player-of-
+                          the-match awards, plus career runs/wickets
+                          at the ladder's rates -- weights in
+                          GOAT_ACCOLADES, reported as two auditable
+                          subtotals per player)
 - season replay odds     (a clearly-labelled TOY model: P(A beats B) =
                           logistic(2 * NRR gap), 5k replays, fixed seed;
                           it is a probability lesson on the official
                           record, never a prediction product)
 
-The weights live in GOAT_WEIGHTS (production) and GOAT_ACCOLADES
-(hardware) below: two published configs, so change them there and the
-ladder, the XI/MVP and the GOAT rankings recompute, with tests pinning
-the schema.
+The weights live in GOAT_WEIGHTS (the ladder) and GOAT_ACCOLADES
+(the GOAT score's hardware + production blocks) below: two published
+configs, so change them there and the ladder, the XI/MVP and the GOAT
+rankings recompute, with tests pinning the schema.
 
 Run `python src/collector/cricsheet.py [--zip PATH] [--no-download]` to
 (re)build the committed fallbacks data/ipl_seasons.json and
@@ -100,17 +102,20 @@ GOAT_WEIGHTS = {
     "player_of_match": 0.5,   # each official PoM award
     "title": 1.0,             # each IPL title won (champion team's XI)
 }
-# Published GOAT (accolades) weights -- HARDWARE only: what the official
-# record says a player won, never how many runs it took. Every weight
-# printed verbatim on the rankings tab, same one-config rule as above.
-# The official IPL "Most Valuable Player" is a voted prize absent from
-# the data, so it can never count (say so, don't invent it).
+# Published GOAT weights -- TWO auditable components in one config:
+# a HARDWARE block (what the official record says a player won) and a
+# PRODUCTION block (the ladder's own rates, so career output counts
+# too). Every weight printed verbatim on the rankings tab. The
+# official IPL "Most Valuable Player" is a voted prize absent from the
+# data, so it can never count (say so, don't invent it).
 GOAT_ACCOLADES = {
     "title": 30.0,            # took the field for the champion
     "runner_up": 12.0,        # took the field for the Final loser
     "orange_cap": 15.0,       # topped the season's run aggregate
     "purple_cap": 15.0,       # topped the season's wicket aggregate
-    "player_of_match": 2.0,   # each official PoM award
+    "player_of_match": 2.0,   # each official PoM award (counted once)
+    "runs_per_1000": 3.0,     # production term, ladder's rate
+    "wickets_per_50": 3.0,    # production term, ladder's rate
 }
 # Season MVP/XI impact: the same two scoring rates on ONE season.
 # Qualifiers keep a part-timer from topping a tiny sample.
@@ -558,8 +563,10 @@ def _career_of(lines: dict, honours: dict, player: str,
                name: str) -> dict:
     """One player's all-time totals + both published scores from his
     season lines: the PRODUCTION ladder (weights in GOAT_WEIGHTS) and
-    the accolade GOAT score (hardware only, weights in GOAT_ACCOLADES).
-    `honours` maps each accolade kind to {player: count}."""
+    the GOAT score (weights in GOAT_ACCOLADES, split into a hardware
+    subtotal and a production subtotal that sum to the total, so the
+    blend stays auditable). `honours` maps each accolade kind to
+    {player: count}."""
     titles = honours["titles"]
     runner_up = honours["runner_up"]
     oranges = honours["orange"]
@@ -600,7 +607,15 @@ def _career_of(lines: dict, honours: dict, player: str,
               "orange_cap": oranges.get(player, 0),
               "purple_cap": purples.get(player, 0),
               "player_of_match": poms.get(player, 0)}
-    goat = round(sum(GOAT_ACCOLADES[k] * n for k, n in counts.items()), 1)
+    # Hardware block (PoM counted ONCE, here) + production block (the
+    # ladder's run/wicket rates). Both subtotals round to 1dp and the
+    # total is their sum, so the columns always add up on screen.
+    hardware = round(sum(GOAT_ACCOLADES[k] * n for k, n in counts.items()),
+                     1)
+    production = round(
+        GOAT_ACCOLADES["runs_per_1000"] * agg["runs"] / 1000
+        + GOAT_ACCOLADES["wickets_per_50"] * agg["wickets"] / 50, 1)
+    goat = round(hardware + production, 1)
     return {"name": name, "seasons": {str(y): s for y, s in
                                      sorted(seasons.items())},
             "career": {**agg, "best": agg["best"] or [0, 0]},
@@ -609,7 +624,8 @@ def _career_of(lines: dict, honours: dict, player: str,
             "runner_up": counts["runner_up"],
             "orange": counts["orange_cap"],
             "purple": counts["purple_cap"],
-            "ladder": ladder, "goat": goat}
+            "ladder": ladder, "goat": goat,
+            "goat_hardware": hardware, "goat_production": production}
 
 
 def build(zip_path: str = None, out_dir: str = DATA_DIR,

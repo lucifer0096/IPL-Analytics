@@ -289,13 +289,21 @@ def test_xi_mvp_and_ladder_weights(zip_path, monkeypatch):
         for p, n in (("aaa1", "A1"), ("bbb1", "B1"))}
     assert careers["aaa1"]["ladder"] == 0.59
     assert careers["bbb1"]["ladder"] == 1.57      # 3x23/1000 + 0.5 + 1.0
-    # GOAT (accolades only): A1 lost the Final + wore an Orange Cap +
-    # one PoM = 12 + 15 + 2; B1 won the title + one PoM = 30 + 2.
-    assert careers["aaa1"]["goat"] == 29.0
+    # GOAT = hardware + production: A1 lost the Final + wore an Orange
+    # Cap + one PoM (12+15+2) over 30 runs (3x30/1000); B1 won the
+    # title + one PoM (30+2) over 23 runs. Subtotals sum to the total.
+    assert careers["aaa1"]["goat_hardware"] == 29.0
+    assert careers["aaa1"]["goat_production"] == 0.1
+    assert careers["aaa1"]["goat"] == 29.1
     assert careers["aaa1"]["runner_up"] == 1
     assert careers["aaa1"]["orange"] == 1
-    assert careers["bbb1"]["goat"] == 32.0
+    assert careers["bbb1"]["goat_hardware"] == 32.0
+    assert careers["bbb1"]["goat_production"] == 0.1
+    assert careers["bbb1"]["goat"] == 32.1
     assert careers["bbb1"]["titles"] == 1
+    assert (careers["aaa1"]["goat_hardware"]
+            + careers["aaa1"]["goat_production"]
+            == careers["aaa1"]["goat"])
 
 
 def test_replay_odds_reproducible_and_conservative(zip_path):
@@ -365,7 +373,10 @@ def test_build_writes_attributed_payloads(zip_path, tmp_path):
     # lost it (runner-up), topped the 2024 runs (Orange Cap), and B1's
     # Beta won it (title); 2023's caps went to DD1/A2 by the same rule.
     assert a1["runner_up"] == 1 and a1["orange"] == 1
-    assert a1["goat"] == 29.0
+    assert a1["goat_hardware"] == 29.0
+    assert a1["goat_production"] == 0.1     # 3 x 30 runs / 1000
+    assert a1["goat"] == 29.1
+    assert a1["goat"] == a1["goat_hardware"] + a1["goat_production"]
     assert players["players"]["ddd1"]["orange"] == 1
     assert players["players"]["xxx2"]["purple"] == 1
     assert built["seasons"]["meta"]["matches"] == 5

@@ -1,7 +1,7 @@
 """IPL Analytics -- every IPL season from the inaugural 2008 campaign
 through the latest, built on Cricsheet's official ball-by-ball files.
 
-Six in-page tabs, one honest rule: every number is a plain sum over the
+Seven in-page tabs, one honest rule: every number is a plain sum over the
 official record (points tables, NRR with the all-out quota, Orange/Purple
 Cap totals, head-to-head, player careers) or a clearly-labelled TOY model
 (the season replay). Nothing is inferred beyond what the data carries,
@@ -13,6 +13,8 @@ deploy's only source (Streamlit Cloud cannot run the collector); rebuild
 them locally with `python src/collector/cricsheet.py`.
 """
 
+import colorsys
+import hashlib
 import html
 import json
 from pathlib import Path
@@ -60,10 +62,6 @@ CSS = """
   border-color: color-mix(in srgb, var(--ipl-gold) 55%, transparent);
 }
 .ipl-sub { opacity: 0.75; font-size: 0.9rem; }
-div[data-testid="stMetric"] {
-  background: var(--ipl-card); border: 1px solid var(--ipl-border);
-  border-radius: 14px; padding: 12px 16px;
-}
 [data-baseweb="tab"] { padding-left: 12px; padding-right: 12px; }
 [data-baseweb="tab"][aria-selected="true"] {
   border-bottom: 2px solid var(--ipl-accent);
@@ -77,10 +75,25 @@ div[data-testid="stMetric"] {
   transparent); }
 .ipl-chip--bowl { border-color: color-mix(in srgb, var(--ipl-gold) 55%,
   transparent); }
-.ipl-chip--mvp {
+.ipl-chip--gold, .ipl-chip--mvp {
   border-color: var(--ipl-gold);
   background: color-mix(in srgb, var(--ipl-gold) 16%, transparent);
 }
+.ipl-player-card {
+  display: flex; align-items: center; gap: 16px;
+  padding: 14px 18px; margin: 2px 0 12px;
+  border: 1px solid var(--ipl-border); border-radius: 16px;
+  background: var(--ipl-card);
+}
+.ipl-avatar {
+  width: 66px; height: 66px; border-radius: 50%; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 22px; font-weight: 800; color: #fff;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.45);
+}
+.ipl-card-body { flex: 1; min-width: 0; }
+.ipl-card-name { font-size: 1.15rem; font-weight: 700; }
+.ipl-card-sub { font-size: 0.85rem; opacity: 0.75; margin-bottom: 4px; }
 </style>
 """
 st.markdown(CSS, unsafe_allow_html=True)
@@ -108,6 +121,106 @@ def _df(rows: list, cols: list) -> pd.DataFrame:
         if col not in frame:
             frame[col] = []
     return frame[cols]
+
+
+# Presentational only -- franchise brand colours for the player card's
+# generated avatar. No photos exist in the record (Cricsheet carries
+# ball-by-ball data, not images) and headshots are other people's
+# copyright, so the card draws initials on the team's colours instead
+# of fetching a face. Anything not listed gets a stable hue derived
+# from its own name.
+TEAM_COLORS = {
+    "Chennai Super Kings": ("#F4C500", "#005DB7"),
+    "Mumbai Indians": ("#004BA0", "#D1AB3E"),
+    "Royal Challengers Bangalore": ("#D5152D", "#111111"),
+    "Royal Challengers Bengaluru": ("#D5152D", "#111111"),
+    "Kolkata Knight Riders": ("#3B2269", "#F2C14E"),
+    "Delhi Capitals": ("#004C93", "#EF1B23"),
+    "Delhi Daredevils": ("#004C93", "#EF1B23"),
+    "Punjab Kings": ("#D71920", "#7E0A10"),
+    "Kings XI Punjab": ("#D71920", "#7E0A10"),
+    "Rajasthan Royals": ("#EA1A85", "#254AA5"),
+    "Sunrisers Hyderabad": ("#F26522", "#0B0B0B"),
+    "Gujarat Titans": ("#1B2133", "#B4975A"),
+    "Lucknow Super Giants": ("#0057E2", "#00306B"),
+    "Deccan Chargers": ("#002B5C", "#C0A062"),
+    "Pune Warriors": ("#E52327", "#4A0A0C"),
+    "Rising Pune Supergiant": ("#D6244E", "#4C0A1C"),
+    "Rising Pune Supergiants": ("#D6244E", "#4C0A1C"),
+    "Gujarat Lions": ("#E8462B", "#1B4F8C"),
+    "Kochi Tuskers Kerala": ("#F5A623", "#0E5C33"),
+}
+
+
+def _team_colors(team: str) -> tuple:
+    if team in TEAM_COLORS:
+        return TEAM_COLORS[team]
+    hue = int(hashlib.md5(team.encode("utf-8")).hexdigest(), 16) % 360
+    top = colorsys.hsv_to_rgb(hue / 360, 0.72, 0.90)
+    base = colorsys.hsv_to_rgb(hue / 360, 0.80, 0.62)
+    return ("#{:02X}{:02X}{:02X}".format(*(round(255 * v) for v in top)),
+            "#{:02X}{:02X}{:02X}".format(*(round(255 * v) for v in base)))
+
+
+def _initials(name: str) -> str:
+    parts = [w for w in name.split() if w]
+    return "".join(w[0].upper() for w in parts[:2]) or "?"
+
+
+def player_card(p: dict) -> str:
+    """The Journey tab's trading card: a generated initials avatar on
+    the player's last team's colours, his career span, and every
+    published number as chips -- career, hardware, ladder and the GOAT
+    score with both subtotals spelled out, so the blend is auditable
+    right on the card. Theme-aware CSS only, so it stays legible on
+    light and dark; every player-supplied string is escaped."""
+    name = html.escape(p.get("name", "?"))
+    lines = p.get("seasons") or {}
+    ordered = sorted(lines, key=int)
+    last = lines[ordered[-1]] if ordered else {}
+    team = last.get("team", "")
+    car = p.get("career") or {}
+    c1, c2 = _team_colors(team)
+    chips = [
+        ("Runs", f"{car.get('runs', 0):,}"),
+        ("HS", str(car.get("hs", 0))),
+        ("Wkts", str(car.get("wickets", 0))),
+    ]
+    best = car.get("best") or [0, 0]
+    if car.get("balls_bowled"):
+        chips.append(("Best", f"{best[0]}/{best[1]}"))
+    chips += [
+        ("PoM", str(p.get("pom", 0))),
+        ("Titles", str(p.get("titles", 0))),
+        ("Runner-up", str(p.get("runner_up", 0))),
+        ("Orange", str(p.get("orange", 0))),
+        ("Purple", str(p.get("purple", 0))),
+        ("Ladder", str(p.get("ladder", 0))),
+    ]
+    gold = {"Titles", "Runner-up", "Orange", "Purple"}
+    chip_html = "".join(
+        f'<span class="{"ipl-chip ipl-chip--gold" if k in gold else "ipl-chip"}">'
+        f"{k} {html.escape(v)}</span>" for k, v in chips)
+    if "goat" in p:                    # a stale build simply omits it
+        chip_html += (f'<span class="ipl-chip ipl-chip--gold">GOAT '
+                      f'{p["goat"]}</span>')
+    sub = f"{ordered[0]}-{ordered[-1]}" if ordered else "no seasons"
+    sub += f" · {team}" if team else ""
+    if "goat_hardware" in p:
+        sub += (f" · GOAT {p['goat']} = {p['goat_hardware']} hardware "
+                f"+ {p['goat_production']} production")
+    return (
+        '<div class="ipl-player-card">'
+        f'<div class="ipl-avatar" style="background-image: '
+        f"linear-gradient(rgba(0,0,0,0.30), rgba(0,0,0,0.30)), "
+        f'linear-gradient(135deg, {c1}, {c2});">'
+        f"{_initials(p.get('name', ''))}</div>"
+        '<div class="ipl-card-body">'
+        f'<div class="ipl-card-name">{name}</div>'
+        f'<div class="ipl-card-sub">{html.escape(sub)}</div>'
+        f'<div>{chip_html}</div>'
+        "</div></div>"
+    )
 
 
 st.title("IPL Analytics")
@@ -389,13 +502,13 @@ with tab_records:
         ["Player", "Runs", "Wkts", "PoM", "Titles", "Ladder"]),
         hide_index=True, width="stretch")
     st.caption(WEIGHTS_CAPTION + " This is the PRODUCTION ladder; the "
-                "GOAT Rankings tab ranks official accolades only.")
+                "GOAT Rankings tab blends hardware + production.")
 
 # --------------------------------------------------------------------------
-# GOAT Rankings (accolades)
+# GOAT Rankings (hardware + production)
 # --------------------------------------------------------------------------
 with tab_goat:
-    st.subheader("GOAT rankings: hardware only")
+    st.subheader("GOAT rankings: hardware + production")
     goat_weights = players_doc.get("goat_weights") or {}
     # A data build that predates this tab has no `goat` field at all --
     # that must read as STALE DATA, never as "nobody won anything".
@@ -420,23 +533,34 @@ with tab_goat:
                     if p.get("seasons") else "")
             rows.append({
                 "#": i, "Player": p["name"], "GOAT": p["goat"],
+                "Hardware": p.get("goat_hardware"),
+                "Production": p.get("goat_production"),
                 "Titles": p["titles"], "Runner-up": p["runner_up"],
                 "Orange": p["orange"], "Purple": p["purple"],
                 "PoM": p["pom"], "Seasons": span})
         st.dataframe(pd.DataFrame(rows), hide_index=True,
                      width="stretch")
-        top10 = rows[:10]
-        fig = go.Figure(go.Bar(
+        # Stacked so the blend is visible: rank 1 on top, hardware and
+        # production as separate segments that add to the bar's length.
+        top10 = list(reversed(rows[:10]))
+        fig = go.Figure()
+        fig.add_trace(go.Bar(
             y=[r["Player"] for r in top10],
-            x=[r["GOAT"] for r in top10], orientation="h",
-            marker_color="#F5C542"))
-        fig.update_layout(height=max(240, 30 * len(top10)),
+            x=[r["Hardware"] for r in top10], orientation="h",
+            name="Hardware", marker_color="#F5C542"))
+        fig.add_trace(go.Bar(
+            y=[r["Player"] for r in top10],
+            x=[r["Production"] for r in top10], orientation="h",
+            name="Production", marker_color="#2CA6A4"))
+        fig.update_layout(barmode="stack",
+                          height=max(240, 30 * len(top10)),
                           margin=dict(l=10, r=10, t=10, b=10),
-                          showlegend=False)
+                          legend_orientation="h")
         st.plotly_chart(fig, width="stretch", key="goat_bar_ipl")
         st.caption(
-            "HARDWARE only -- what the official record says a player "
-            "won, never how many runs it took: "
+            "Two auditable components, one published config "
+            "(GOAT_ACCOLADES); GOAT = Hardware + Production columns. "
+            "HARDWARE is what the official record says a player won: "
             f"{goat_weights.get('title', 30.0)} per title (took the "
             f"field for the champion), "
             f"{goat_weights.get('runner_up', 12.0)} per Final lost, "
@@ -445,10 +569,14 @@ with tab_goat:
             f"{goat_weights.get('purple_cap', 15.0)} per Purple Cap "
             "(topped the season's wickets), "
             f"{goat_weights.get('player_of_match', 2.0)} per official "
-            "player-of-the-match award. The official IPL Most Valuable "
-            "Player is a voted prize Cricsheet does not carry, so it "
-            "cannot count -- and this app's formula XI is not official "
-            "hardware either, so it does not count here. " + SOURCE_LINE)
+            "player-of-the-match award (counted once, in hardware). "
+            "PRODUCTION adds career output at the ladder's own rates: "
+            f"{goat_weights.get('runs_per_1000', 3.0)} per 1000 runs + "
+            f"{goat_weights.get('wickets_per_50', 3.0)} per 50 wickets. "
+            "The official IPL Most Valuable Player is a voted prize "
+            "Cricsheet does not carry, so it cannot count -- and this "
+            "app's formula XI is not official hardware either. "
+            + SOURCE_LINE)
 
 # --------------------------------------------------------------------------
 # Player Journey
@@ -473,12 +601,11 @@ with tab_journey:
             st.info("That player vanished from the record.")
         else:
             career = match[0]["career"]
-            k1, k2, k3, k4, k5 = st.columns(5)
-            k1.metric("Runs", career["runs"])
-            k2.metric("Wickets", career["wickets"])
-            k3.metric("Player of the match", match[0]["pom"])
-            k4.metric("Titles", match[0]["titles"])
-            k5.metric("Ladder", match[0]["ladder"])
+            # The card replaces the old metric row: avatar, span, team,
+            # and every published number (career, hardware, ladder, the
+            # GOAT blend) as chips, so the tab opens with one object
+            # instead of five disconnected numbers.
+            st.markdown(player_card(match[0]), unsafe_allow_html=True)
             lines = match[0].get("seasons") or {}
             if not lines:
                 st.info("No season lines for this player.")

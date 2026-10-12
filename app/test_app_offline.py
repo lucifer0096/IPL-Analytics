@@ -71,9 +71,10 @@ def test_app_renders_all_seven_tabs():
     assert "LEAGUE PHASE ONLY" in text
     assert "TOY model, not a prediction product" in text
     assert "RENAMES only" in text
-    # The GOAT tab ranks HARDWARE and says what does NOT count: the
-    # voted MVP (absent from the data) and the app's own formula XI.
-    assert "HARDWARE only" in text
+    # The GOAT tab blends two auditable components and says what does
+    # NOT count: the voted MVP (absent from the data) and the app's
+    # own formula XI.
+    assert "Two auditable components" in text
     assert "Most Valuable Player is a voted prize" in text
 
 
@@ -89,16 +90,22 @@ def test_latest_season_points_table_is_real():
     assert table["P"].max() <= 19
 
 
-def test_goat_rankings_lead_with_the_hardware():
-    """The GOAT table is the 7th dataframe on the page and ranks by the
-    accolade score -- titles, finals lost, caps, PoM -- with the
-    all-time leader on top (committed-data pin: reviewed when a future
-    season legitimately reshuffles the summit)."""
+def test_goat_rankings_blend_hardware_and_production():
+    """The GOAT table (7th dataframe) shows the blend with separate
+    Hardware / Production columns that sum to the total, ranked by it
+    (committed-data pin: the all-time leader sits on top; reviewed when
+    a future season legitimately reshuffles the summit)."""
     at = _render()
     goat = at.dataframe[6].value
-    assert list(goat.columns)[:5] == ["#", "Player", "GOAT", "Titles",
+    assert list(goat.columns)[:7] == ["#", "Player", "GOAT", "Hardware",
+                                      "Production", "Titles",
                                       "Runner-up"]
     assert goat["Player"].iloc[0] == "MS Dhoni"
+    # The columns must add up -- that is the audit trail for the blend.
+    assert abs(goat["GOAT"].iloc[0]
+               - (goat["Hardware"].iloc[0]
+                  + goat["Production"].iloc[0])) < 0.05
+    assert goat["Production"].iloc[0] > 0        # career output counts
     assert goat["GOAT"].iloc[0] > goat["GOAT"].iloc[1] > 0
     assert int(goat["Titles"].iloc[0]) >= 4
 
@@ -122,6 +129,11 @@ def test_player_journey_renders_after_selection():
     assert "MS Dhoni" in text
     assert "Pick a player" not in text      # the prompt is gone
     assert at.dataframe                    # the career table is up
+    # The player card: generated initials avatar ("MS Dhoni" -> "MD",
+    # only in the card, not in the CSS) and the auditable GOAT
+    # breakdown line (only the card spells the two subtotals out).
+    assert ">MD</div>" in text
+    assert " hardware + " in text
 
 
 def test_stale_data_without_goat_field_is_an_honest_error(monkeypatch):

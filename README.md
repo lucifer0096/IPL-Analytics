@@ -21,8 +21,8 @@ silent the UI says so.
 | Fixtures & Results | Every match of the season with the recorded scoreline, stage, venue and player of the match |
 | Head-to-Head | All-history rivalries (franchise renames merged), most-played pairings |
 | Records & Ladder | The season's formula XI + MVP, Orange/Purple Caps, the published-weights all-time ladder |
-| GOAT Rankings | All-time rankings on **accolades only**: titles, finals lost, Orange/Purple Caps, official player-of-the-match awards |
-| Player Journey | One player, every season: teams across eras, runs, wickets, the whole career line |
+| GOAT Rankings | All-time rankings blending **hardware** (titles, finals lost, Orange/Purple Caps, official player-of-the-match awards) with **production** (career runs/wickets at the ladder's rates), both subtotals shown |
+| Player Journey | A player card (generated initials avatar on his last team's colours, career + accolades + GOAT blend) and every season he took the field: teams across eras, runs, wickets, the whole career line |
 | Season Replay | A transparent toy model: replay every league match 5,000 times from seed, playoff and title odds |
 
 ## Why it looks like this
@@ -35,7 +35,8 @@ silent the UI says so.
 - **One published weights config.** The all-time ladder, the season XI
   and the MVP all run off `GOAT_WEIGHTS` in
   `src/collector/cricsheet.py`; the GOAT Rankings tab runs off
-  `GOAT_ACCOLADES` (hardware only). Change a config, everything
+  `GOAT_ACCOLADES` (a hardware block plus a production block, reported
+  as two columns that sum to the score). Change a config, everything
   recomputes, the tests pin the schema.
 - **The replay owns its label.** The Season Replay tab is a toy: team
   strength is the actual NRR gap through a logistic curve, no form,
