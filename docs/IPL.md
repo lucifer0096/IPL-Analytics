@@ -145,6 +145,53 @@ GOAT blend with both subtotals spelled out on the card.
   app prints the method, seed, and the verdict against what actually
   happened.
 
+### Replay backtest (same model, honest cutoff)
+
+- Same logistic model, but each season is seeded **only** from the
+  PRIOR season's final NRR -- a franchise with no prior season starts at
+  0.0, league average by construction. Nothing from the season being
+  replayed enters its strengths (that is the difference from the
+  single-season replay above).
+- Each league match replayed 1,000 times from seed 2026; the predicted
+  top four = highest simulated qualification rate; scored against the
+  four teams that actually reached the playoffs (Q1 + Eliminator between
+  them name all four in every recorded season).
+- Result in the current record: 18 seasons (2009-2026), average
+  overlap **2.11 of 4**, zero exact top fours, worst year 2022 at 0 --
+  the GT/LSG expansion season no prior table could predict. The app
+  prints the method verbatim and names that blind spot.
+
+### Over phases (powerplay / middle / death)
+
+- Phases by over faced, 0-based over index: powerplay = overs 1-6
+  (index 0-5), middle = 7-15 (6-14), death = 16-20 (15-19).
+- Per team per season: runs scored and legal balls faced in each phase
+  (a wide adds runs but no ball); RPO = runs / (balls / 6). Whole
+  season, playoffs included, team names as played that year; the
+  all-time profile sums every season under merged franchise names.
+- Nothing is modelled: these are the deliveries, bucketed.
+
+### Milestones within reach
+
+- Population: players who took the field in the LATEST season in the
+  record. For each, the next round career number strictly above the
+  total: runs to the next thousand up to 10,000, wickets to the next 50
+  up to 300 (past the top rung = no row). Closest first, top ten.
+- A **gap, not a projection**: no batting pace, games left or fitness is
+  assumed, and the caption says so.
+
+### Season finish (Franchise pages)
+
+- Furthest stage reached that season: Champions (won the Final),
+  Runner-up (played the Final), Lost Qualifier 2, Semi-final exit
+  (2008-2010 format), Lost Eliminator (stage "Eliminator" or the old
+  "Elimination Final"), Lost Qualifier 1, else League stage.
+- League position comes from the league-phase-only table (as-played
+  team name); the all-time record against each opponent sums the same
+  rename-merged head-to-head rows the Head-to-Head tab shows. Super
+  Over ties count under Tied, with the Super Over winner named on the
+  Fixtures tab.
+
 ## Team renames (merged) vs successors (not merged)
 
 Same franchise, new name -- merged in all-time views only:
@@ -159,6 +206,24 @@ Same franchise, new name -- merged in all-time views only:
 Different franchises that merely wore the city -- **not** merged:
 Deccan Chargers vs Sunrisers Hyderabad, Gujarat Lions vs Gujarat
 Titans.
+
+## Venue label merges (same ground)
+
+Cricsheet writes every historical spelling of a ground; all-time venue
+views merge them through `VENUE_ALIASES` (same policy as team renames:
+explicit, auditable, same-ground only, no chains -- fixtures keep the
+string each match was published under). Examples: "Wankhede Stadium" =
+"Wankhede Stadium, Mumbai"; "Feroz Shah Kotla" was renamed **Arun
+Jaitley Stadium**; "Sardar Patel Stadium, Motera" was rebuilt as
+**Narendra Modi Stadium, Ahmedabad**; "Subrata Roy Sahara Stadium" =
+Maharashtra Cricket Association Stadium (sponsor name); "OUTsurance
+Oval" = SuperSport Park (2009 mixed both); "Zayed Cricket Stadium, Abu
+Dhabi" = Sheikh Zayed Stadium; the four PCA Mohali spellings; and the
+city-suffix variants of Eden Gardens, Chinnaswamy (punctuation too),
+Chepauk, Rajiv Gandhi/Uppal, DY Patil, Sawai Mansingh, Brabourne,
+HPCA Dharamsala, ACA-VDCA, Raipur and Mullanpur/New Chandigarh.
+26 aliases cover 19 grounds; ties and no-results count in a venue's
+match count but award nobody a win.
 
 ## What is honestly absent
 

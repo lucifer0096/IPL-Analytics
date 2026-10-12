@@ -10,7 +10,7 @@ built on [Cricsheet](https://cricsheet.org)'s official ball-by-ball
 record (1,243 matches, 19 seasons, 804 players -- and refreshed by
 rerunning one script).
 
-Six tabs, one rule: **every number is either a plain sum over the
+Ten tabs, one rule: **every number is either a plain sum over the
 official record or a clearly-labelled toy model.** Nothing is invented,
 nothing is inferred beyond what the data carries, and when the record is
 silent the UI says so.
@@ -19,11 +19,14 @@ silent the UI says so.
 | --- | --- |
 | Points Table | The official league-phase table: points, NRR with the all-out quota, league topper and season champion |
 | Fixtures & Results | Every match of the season with the recorded scoreline, stage, venue and player of the match |
+| Season Insights | Per-team over phases (powerplay 1-6, middle 7-15, death 16-20: runs and run rate), the all-time phase profile, and the top grounds with their most successful visitors (same-ground spellings merged) |
 | Head-to-Head | All-history rivalries (franchise renames merged), most-played pairings |
-| Records & Ladder | The season's formula XI + MVP, Orange/Purple Caps, the published-weights all-time ladder |
+| Franchises | A franchise's whole arc: every season's league position and finish, title timeline, era names, all-time record vs each opponent |
+| Records & Ladder | The season's formula XI + MVP, Orange/Purple Caps, the published-weights all-time ladder, and the milestone gaps active players are sitting on |
 | GOAT Rankings | All-time rankings blending **hardware** (titles, finals lost, Orange/Purple Caps, official player-of-the-match awards) with **production** (career runs/wickets at the ladder's rates), both subtotals shown |
 | Player Journey | A player card (generated initials avatar on his last team's colours, career + accolades + GOAT blend) and every season he took the field: teams across eras, runs, wickets, the whole career line |
-| Season Replay | A transparent toy model: replay every league match 5,000 times from seed, playoff and title odds |
+| Compare | Two players side by side: career metrics, honours, the GOAT sum per column, and runs/wickets by season overlaid |
+| Season Replay | A transparent toy model: replay every league match 5,000 times from seed, playoff and title odds -- plus a backtest of the same model seeded ONLY from the prior season's NRR, scored against the real playoff teams |
 
 ## Why it looks like this
 
@@ -42,6 +45,12 @@ silent the UI says so.
   strength is the actual NRR gap through a logistic curve, no form,
   injuries or home advantage. It prints its method, its seed and its
   verdict -- "finished NOT as champion" when it was wrong.
+- **The backtest owns its cutoff.** The same model, replayed with
+  strengths from the PRIOR season's final NRR only -- nothing from the
+  season being replayed -- then scored against the four teams that
+  actually reached the playoffs. Average overlap: 2.11 of 4 across 18
+  seasons, zero exact top fours, worst year the 2022 expansion season
+  no prior table could know. The blind spot is printed, not hidden.
 - **Attribution everywhere.** Data: Cricsheet (cricsheet.org),
   Open Data Commons Attribution License. Every tab carries the credit,
   as the license requires.
@@ -83,10 +92,11 @@ for Streamlit Cloud setup.
 ## Layout
 
 ```
-app/app.py                    the Streamlit app (six tabs)
+app/app.py                    the Streamlit app (ten tabs)
 src/collector/cricsheet.py    collector + every computed aggregate
 src/collector/test_cricsheet.py  synthetic-fixture tests for every rule
-data/ipl_seasons.json         per-season tables, fixtures, caps, XI, replay
+data/ipl_seasons.json         per-season tables, fixtures, phases, caps,
+                              XI, replay + the prior-season backtest
 data/ipl_players.json         registry-keyed careers + ladder scores
 docs/                         formula reference, collector, deployment
 ```

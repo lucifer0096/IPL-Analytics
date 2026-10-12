@@ -23,7 +23,7 @@ python src/collector/cricsheet.py --out DIR    # write elsewhere
 
 | File | Contents |
 | --- | --- |
-| `data/ipl_seasons.json` | source, generated-utc stamp, meta counts, `team_aliases`, per season: champion, points table (league phase), fixtures, Orange/Purple Cap tables, formula XI + MVP, replay odds; all-time `h2h` |
+| `data/ipl_seasons.json` | source, generated-utc stamp, meta counts, `team_aliases`, `venue_aliases`, per season: champion, points table (league phase), fixtures (incl. the decisive `winner`; ties/no-results are None), phase splits per team, Orange/Purple Cap tables, formula XI + MVP, replay odds; all-time `h2h`; the `backtest` (prior-season strengths vs real playoffs) |
 | `data/ipl_players.json` | source, stamp, `ladder_weights` + `goat_weights`, registry-keyed players: per-season lines (team, batting, bowling), career totals, PoM, titles, runner-ups, Orange/Purple Caps, ladder score, GOAT score with `goat_hardware` + `goat_production` subtotals |
 
 Both are committed because Streamlit Cloud cannot run the collector; the
@@ -36,19 +36,28 @@ sidebar.
    season year from the match DATE (labels are ambiguous: `2020/21` is
    the 2020 season), players keyed by `registry.people` ids, per-innings
    batting/bowling splits with the extras and dismissal-kind rules (see
-   `docs/IPL.md`). A corrupt member is skipped, never fatal.
+   `docs/IPL.md`), plus runs/legal balls per over phase
+   (powerplay/middle/death, by 0-based over index). A corrupt member is
+   skipped, never fatal.
 2. `_line_accum` -- grows one batting/bowling line per (player, season),
    shared by caps, journeys and careers.
 3. `season_table` -- official points + NRR (league phase only, all-out
    side credited the full quota).
 4. `season_fixtures` -- scoreline + result sentence per match
-   (margin, super-over winner, or honest no-result).
+   (margin, super-over winner, or honest no-result) and the decisive
+   winner team (None for ties and no-results).
 5. `season_caps` / `season_xi` -- most runs / most wickets; the
    published formula XI and MVP (weights in `GOAT_WEIGHTS`).
 6. `head_to_head` -- all-history pair records under rename-merged names.
 7. `replay_odds` -- the labelled toy model: logistic on the NRR gap,
    5,000 league-match replays from seed 2026, real IPL knockout format.
-8. `_career_of` -- per-player totals + the published ladder score.
+8. `replay_backtest` -- the same model with an honest cutoff: strengths
+   from the PRIOR season's NRR only (new franchise = 0.0), 1,000
+   replays per season, predicted top four vs the real playoff teams.
+9. `_career_of` -- per-player totals + the published ladder score.
+   Phase splits are summed per team per season along the way; venue and
+   team label merges (`VENUE_ALIASES`, `TEAM_ALIASES`) are carried
+   through so all-time views join on one canonical name.
 
 ## Determinism
 
