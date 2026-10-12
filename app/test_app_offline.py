@@ -167,6 +167,40 @@ def test_stale_data_without_goat_field_is_an_honest_error(monkeypatch):
     assert "No player in the record has ever won anything" not in text
 
 
+def test_stale_data_without_the_split_is_named_not_blank(monkeypatch):
+    """An intermediate build (has `goat` but no `goat_hardware` /
+    `goat_production`) would silently render the two columns as blank
+    cells -- the exact bug seen against a stale session. It must
+    surface as a named stale-data error carrying the build stamp, and
+    the Hardware/Production table must not render at all."""
+    real_read = Path.read_text
+
+    def _stale(self, *args, **kwargs):
+        text = real_read(self, *args, **kwargs)
+        if self.name == "ipl_players.json":
+            doc = json.loads(text)
+            for player in doc.get("players", {}).values():
+                player.pop("goat_hardware", None)
+                player.pop("goat_production", None)
+            return json.dumps(doc)
+        return text
+
+    monkeypatch.setattr(Path, "read_text", _stale)
+    import streamlit as st  # noqa: PLC0415 - test-local cache reset
+
+    st.cache_data.clear()
+    at = AppTest.from_file(str(REPO_ROOT / "app" / "app.py"),
+                           default_timeout=60)
+    at.run()
+    assert not at.exception, f"page raised: {at.exception}"
+    text = _text(at)
+    assert "predates the hardware/production split" in text
+    assert "Data build stamp:" in text        # which build is live
+    assert "No player in the record has ever won anything" not in text
+    assert not any("Hardware" in list(df.value.columns)
+                   for df in at.dataframe)
+
+
 def test_missing_data_files_are_an_honest_error(monkeypatch):
     """With both payloads gone (fresh checkout before the collector ran,
     or a bad deploy) the page must SAY SO -- an error naming the files

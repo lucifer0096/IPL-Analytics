@@ -99,10 +99,30 @@ CSS = """
 st.markdown(CSS, unsafe_allow_html=True)
 
 
+def _data_stamp() -> str:
+    """mtime signature of the two payloads. Streamlit's file watcher
+    only tracks .py files, so a data rebuild on disk never triggers a
+    rerun by itself -- but this string is part of the load_docs cache
+    key, so the next rerun (any widget interaction) reloads the fresh
+    JSON instead of serving what was cached at server start. This is
+    exactly the 'new code, old rows' trap: watcher picks up app.py,
+    cache keeps last session's data."""
+    parts = []
+    for name in ("ipl_seasons.json", "ipl_players.json"):
+        path = DATA_DIR / name
+        try:
+            parts.append(f"{name}:{path.stat().st_mtime_ns}")
+        except OSError:
+            parts.append(f"{name}:missing")
+    return "|".join(parts)
+
+
 @st.cache_data
-def load_docs() -> dict:
-    """The two committed payloads, parsed once per session. A missing or
-    unreadable file is an honest empty state in the UI, never a crash."""
+def load_docs(stamp: str) -> dict:
+    """The two committed payloads, parsed once per session (keyed by
+    `_data_stamp`, so a rebuild on disk invalidates the cache). A
+    missing or unreadable file is an honest empty state in the UI,
+    never a crash."""
     out = {}
     for name in ("ipl_seasons.json", "ipl_players.json"):
         path = DATA_DIR / name
@@ -224,7 +244,7 @@ def player_card(p: dict) -> str:
 
 
 st.title("IPL Analytics")
-docs = load_docs()
+docs = load_docs(_data_stamp())
 seasons_doc = docs.get("ipl_seasons.json")
 players_doc = docs.get("ipl_players.json")
 
@@ -510,19 +530,32 @@ with tab_records:
 with tab_goat:
     st.subheader("GOAT rankings: hardware + production")
     goat_weights = players_doc.get("goat_weights") or {}
-    # A data build that predates this tab has no `goat` field at all --
-    # that must read as STALE DATA, never as "nobody won anything".
+    build_stamp = players_doc.get("_generated_utc", "unknown")
+    # A data build older than this tab must read as STALE DATA with its
+    # stamp, never as "nobody won anything" and never as blank cells:
+    # a missing field below would silently render an empty column.
     built_with_goat = any("goat" in p for p in players.values())
+    split_ok = all("goat_hardware" in p and "goat_production" in p
+                   for p in players.values())
     ranked = (sorted((p for p in players.values()
                       if p.get("goat", 0) > 0),
                      key=lambda p: -p["goat"])[:25]
-              if built_with_goat else [])
+              if built_with_goat and split_ok else [])
     if not built_with_goat:
         st.error(
             "This build of data/ipl_players.json predates the GOAT "
             "rankings (no `goat` field on any player). Rebuild with "
             "`python src/collector/cricsheet.py` and redeploy -- an "
-            "empty table here would misrepresent the record."
+            "empty table here would misrepresent the record. "
+            f"Data build stamp: {build_stamp}."
+        )
+    elif not split_ok:
+        st.error(
+            "This build of data/ipl_players.json predates the "
+            "hardware/production split (no `goat_hardware` / "
+            "`goat_production` fields), so those columns would render "
+            "blank. Rebuild with `python src/collector/cricsheet.py` "
+            f"and redeploy. Data build stamp: {build_stamp}."
         )
     elif not ranked:
         st.info("No player in the record has ever won anything.")
