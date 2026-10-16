@@ -160,6 +160,15 @@ careers are no longer buried under run-scorers), AB de Villiers at #7
 hardware-heavy candidates such as Ambati Rayudu outside the top 20
 (#23).
 
+**Ladder views.** The tab can slice the same index by role --
+Batters, Bowlers, All-rounders (top 25 of that role, ranked within
+it) -- so the all-time bowling ladder is readable without
+wicket-takers buried under a page of run-scorers. Rank numbers are
+local to the view and the caption says so; every score stays on the
+all-player 0-100 scale, and the table carries the career columns
+(runs, strike rate, wickets, economy, catches) that explain each
+score.
+
 Four honesty rules the rankings tab prints:
 
 - The **official IPL Most Valuable Player** is a voted prize that

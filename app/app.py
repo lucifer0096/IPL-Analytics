@@ -878,10 +878,23 @@ with tab_goat:
     built_with_goat = any("goat" in p for p in players.values())
     split_ok = all("goat_hardware" in p and "goat_production" in p
                    for p in players.values())
-    ranked = (sorted((p for p in players.values()
-                      if p.get("goat", 0) > 0),
-                     key=lambda p: -p["goat"])[:25]
-              if built_with_goat and split_ok else [])
+    ordered = (sorted((p for p in players.values()
+                       if p.get("goat", 0) > 0),
+                      key=lambda p: -p["goat"])
+               if built_with_goat and split_ok else [])
+    # Ladder view: the whole ladder, or one role's slice of it -- the
+    # SAME published 0-100 index either way, with ranks local to the
+    # view. The picker only renders on a sound build: on a stale one
+    # the error below is the story, not a filter.
+    view = (st.radio("Ladder view",
+                     ["All players", "Batters", "Bowlers",
+                      "All-rounders"],
+                     horizontal=True, key="goat_role_ipl")
+            if ordered else None)
+    want = {"Batters": "batter", "Bowlers": "bowler",
+            "All-rounders": "all-rounder"}.get(view)
+    ranked = ([p for p in ordered if p.get("role") == want][:25]
+              if want else ordered[:25])
     if not built_with_goat:
         st.error(
             "This build of data/ipl_players.json predates the GOAT "
@@ -899,14 +912,31 @@ with tab_goat:
             f"and redeploy. Data build stamp: {build_stamp}."
         )
     elif not ranked:
-        st.info("No player in the record has ever won anything.")
+        st.info(
+            "No player in the record has ever won anything."
+            if want is None else
+            f"The record has no {view.lower()} with a GOAT score.")
     else:
+        if want:
+            st.caption(
+                f"{view}: the same published 0-100 index, ranked "
+                f"within the role (top {len(ranked)} of them). Rank "
+                "numbers are local to this view; every score is on "
+                "the all-player scale, so 100.0 is still the "
+                "all-time leader of the full ladder.")
         rows = []
         for i, p in enumerate(ranked, start=1):
             span = (f"{min(p['seasons'])}-{max(p['seasons'])}"
                     if p.get("seasons") else "")
+            c = p.get("career") or {}
             rows.append({
                 "#": i, "Player": p["name"], "Role": p.get("role", "-"),
+                "Runs": c.get("runs", 0),
+                "SR": (c.get("sr") if c.get("sr") is not None else "-"),
+                "Wkts": c.get("wickets", 0),
+                "Econ": (c.get("econ")
+                         if c.get("econ") is not None else "-"),
+                "Catches": c.get("catches", 0),
                 "GOAT": p["goat"],
                 "Hardware": p.get("goat_hardware"),
                 "Production": p.get("goat_production"),

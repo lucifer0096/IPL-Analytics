@@ -120,10 +120,14 @@ def test_goat_rankings_blend_hardware_and_production():
     bowlers and all-rounders must all appear near the top, because
     production is judged per discipline, not per run."""
     at = _render()
-    goat = _table(at, ["#", "Player", "Role", "GOAT"])
-    assert list(goat.columns)[:8] == ["#", "Player", "Role", "GOAT",
-                                      "Hardware", "Production", "Titles",
-                                      "Runner-up"]
+    goat = _table(at, ["#", "Player", "Role", "Runs"])
+    # Career context sits next to the name (this is a career table
+    # too), then the score block: every column the blend needs.
+    assert list(goat.columns)[:8] == ["#", "Player", "Role", "Runs",
+                                      "SR", "Wkts", "Econ", "Catches"]
+    assert list(goat.columns)[8:11] == ["GOAT", "Hardware",
+                                        "Production"]
+    assert "Titles" in goat.columns and "Seasons" in goat.columns
     assert goat["Player"].iloc[0] == "V Kohli"
     assert goat["Role"].iloc[0] == "batter"
     # The columns must add up -- that is the audit trail for the blend.
@@ -153,6 +157,33 @@ def test_goat_rankings_blend_hardware_and_production():
     assert "HIS ERA" in text                     # bowling pars follow era
     assert "league scoring itself swung" in text
     assert "V Kohli" in text
+
+
+def test_goat_role_ladders_filter_one_role():
+    """The ladder view slices the SAME 0-100 index by role: bowlers
+    ranked against bowlers, batters against batters -- each row still
+    carrying the career columns that explain its score, and ranks
+    local to the view said out loud in the caption."""
+    at = _render()
+    at.radio(key="goat_role_ipl").set_value("Bowlers").run()
+    assert not at.exception, f"page raised: {at.exception}"
+    bowlers = _table(at, ["#", "Player", "Role", "Runs"])
+    assert (bowlers["Role"] == "bowler").all()
+    assert bowlers["Player"].iloc[0] == "B Kumar"  # best bowler by index
+    assert list(bowlers["#"]) == list(range(1, len(bowlers) + 1))
+    assert int(bowlers["Wkts"].iloc[0]) >= 50      # career column is real
+    assert "ranked within the role" in _text(at)
+    at.radio(key="goat_role_ipl").set_value("Batters").run()
+    assert not at.exception, f"page raised: {at.exception}"
+    batters = _table(at, ["#", "Player", "Role", "Runs"])
+    assert (batters["Role"] == "batter").all()
+    assert batters["Player"].iloc[0] == "V Kohli"
+    assert int(batters["Runs"].iloc[0]) > 9000     # reviewed with the
+    assert batters["SR"].iloc[0] != "-"            # record, per Compare
+    at.radio(key="goat_role_ipl").set_value("All players").run()
+    assert not at.exception, f"page raised: {at.exception}"
+    allp = _table(at, ["#", "Player", "Role", "Runs"])
+    assert allp["Player"].iloc[0] == "V Kohli"     # the full ladder again
 
 
 def test_season_insights_phases_and_venues():
