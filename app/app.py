@@ -228,6 +228,15 @@ def player_card(p: dict) -> str:
     best = car.get("best") or [0, 0]
     if car.get("balls_bowled"):
         chips.append(("Best", f"{best[0]}/{best[1]}"))
+        if car.get("econ") is not None:
+            chips.append(("Econ", str(car["econ"])))
+        if car.get("bowl_avg") is not None:
+            chips.append(("Avg", str(car["bowl_avg"])))
+    if (car.get("catches") or car.get("stumpings")
+            or car.get("run_outs")):
+        chips.append(("Catches", str(car.get("catches", 0))))
+        chips.append(("Stumpings", str(car.get("stumpings", 0))))
+        chips.append(("Run-outs", str(car.get("run_outs", 0))))
     chips += [
         ("PoM", str(p.get("pom", 0))),
         ("Titles", str(p.get("titles", 0))),
@@ -245,6 +254,8 @@ def player_card(p: dict) -> str:
                       f'{p["goat"]}</span>')
     sub = f"{ordered[0]}-{ordered[-1]}" if ordered else "no seasons"
     sub += f" · {team}" if team else ""
+    if p.get("role"):
+        sub += f" · {p['role']}"
     if "goat_hardware" in p:
         sub += (f" · GOAT {p['goat']} = {p['goat_hardware']} hardware "
                 f"+ {p['goat_production']} production")
@@ -792,7 +803,8 @@ with tab_records:
         ["Player", "Runs", "Wkts", "PoM", "Titles", "Ladder"]),
         hide_index=True, width="stretch")
     st.caption(WEIGHTS_CAPTION + " This is the PRODUCTION ladder; the "
-                "GOAT Rankings tab blends hardware + production.")
+                "GOAT Rankings tab blends hardware + role-gated "
+                "production.")
 
     st.markdown("#### Milestones within reach")
     latest = max(int(y) for y in seasons)
@@ -844,7 +856,7 @@ with tab_records:
 # GOAT Rankings (hardware + production)
 # --------------------------------------------------------------------------
 with tab_goat:
-    st.subheader("GOAT index (0-100): hardware + production")
+    st.subheader("GOAT index (0-100): hardware + role-gated production")
     goat_weights = players_doc.get("goat_weights") or {}
     goat_index = players_doc.get("goat_index") or {}
     build_stamp = players_doc.get("_generated_utc", "unknown")
@@ -882,7 +894,8 @@ with tab_goat:
             span = (f"{min(p['seasons'])}-{max(p['seasons'])}"
                     if p.get("seasons") else "")
             rows.append({
-                "#": i, "Player": p["name"], "GOAT": p["goat"],
+                "#": i, "Player": p["name"], "Role": p.get("role", "-"),
+                "GOAT": p["goat"],
                 "Hardware": p.get("goat_hardware"),
                 "Production": p.get("goat_production"),
                 "Titles": p["titles"], "Runner-up": p["runner_up"],
@@ -933,11 +946,31 @@ with tab_goat:
             "(topped the season's wickets), "
             f"{goat_weights.get('player_of_match', 2.5)} per official "
             "player-of-the-match award (counted once, in hardware). "
-            "PRODUCTION adds career output at the config's own rates: "
-            f"{goat_weights.get('runs_per_1000', 12.0)} per 1000 runs + "
+            "PRODUCTION is ROLE-GATED -- nobody is judged on a "
+            "discipline he never played. Batters and all-rounders "
+            "(1000+ career runs) score "
+            f"{goat_weights.get('runs_per_1000', 12.0)} per 1000 runs; "
+            "bowlers and all-rounders (30+ career wickets) score "
             f"{goat_weights.get('wickets_per_50', 16.0)} per 50 wickets "
-            "-- so a 200-wicket career matches a 7000-run one, and a "
-            "squad ring can never outrank a decade of output. The "
+            "plus a quality bonus: "
+            f"{goat_weights.get('economy_weight', 6.0)} per run/over "
+            f"under the {goat_weights.get('economy_par', 8.5)} par "
+            "economy (20+ overs bowled) and "
+            f"{goat_weights.get('average_weight', 3.0)} per run under "
+            f"the {goat_weights.get('average_par', 28.0)} par average "
+            "(50+ wickets), plus "
+            f"{goat_weights.get('four_wkts', 2.0)} per four-for and "
+            f"{goat_weights.get('five_wkts', 4.0)} per five-for. "
+            "Fielding counts for EVERYONE: "
+            f"{goat_weights.get('catch', 0.15)} per catch, "
+            f"{goat_weights.get('stumping', 0.3)} per stumping, "
+            f"{goat_weights.get('run_out', 0.3)} per run out. A player "
+            "below both career gates is a part-timer, scored on "
+            "fielding only -- so Kohli's four career wickets are not a "
+            "bowling record and Malinga's 88 runs are not a batting "
+            "record, while Jadeja is paid for batting, bowling and "
+            "catching alike. A squad ring can never outrank a decade "
+            "of output. The "
             "official IPL Most Valuable Player is a voted prize "
             "Cricsheet does not carry, so it cannot count -- and this "
             "app's formula XI is not official hardware either. "
@@ -994,6 +1027,8 @@ with tab_journey:
                                       2) if bowl["balls"] else "",
                         "Best": f"{best[0]}/{best[1]}"
                                 if bowl["balls"] else "",
+                        "Catches": ln.get("fielding", {}).get(
+                            "catches", 0),
                     })
                 frame = pd.DataFrame(rows)
                 st.dataframe(frame, hide_index=True, width="stretch")
@@ -1010,6 +1045,9 @@ with tab_journey:
                         f" Career {career['runs']} runs at a "
                         f"{100.0 * career['runs'] / career['balls']:.1f}"
                         " strike rate.")
+                if match[0].get("role"):
+                    sentence += (f" Role by the published career gates: "
+                                 f"{match[0]['role']}.")
                 st.markdown(sentence)
                 st.caption(
                     "Every season he took the field, per Cricsheet's "
@@ -1054,6 +1092,7 @@ with tab_compare:
                 return [
                     ("Seasons played", len(seasons)),
                     ("Span", span),
+                    ("Role", p.get("role", "-")),
                     ("Runs", c["runs"]),
                     ("Highest score", c["hs"]),
                     ("Batting strike rate",
@@ -1065,6 +1104,16 @@ with tab_compare:
                     ("Best bowling",
                      (f"{c['best'][0]}/{c['best'][1]}"
                       if c.get("best") else "-")),
+                    ("Economy (career)",
+                     c.get("econ") if c.get("econ") is not None else "-"),
+                    ("Bowling average",
+                     (c.get("bowl_avg")
+                      if c.get("bowl_avg") is not None else "-")),
+                    ("Four-fors / five-fors",
+                     f"{c.get('four_wkts', 0)} / {c.get('five_wkts', 0)}"),
+                    ("Catches / stumpings / run outs",
+                     (f"{c.get('catches', 0)} / {c.get('stumpings', 0)}"
+                      f" / {c.get('run_outs', 0)}")),
                     ("Player of the match awards", p["pom"]),
                     ("Titles", p["titles"]),
                     ("Runner-up finishes", p["runner_up"]),

@@ -116,13 +116,16 @@ def test_goat_rankings_blend_hardware_and_production():
     Production columns that sum to the total, ranked by the published
     0-100 INDEX (committed-data pin: the all-time leader sits at the
     top of the index; reviewed when a future season legitimately
-    reshuffles the summit)."""
+    reshuffles the summit). The leaderboard is role-aware: batters,
+    bowlers and all-rounders must all appear near the top, because
+    production is judged per discipline, not per run."""
     at = _render()
-    goat = _table(at, ["#", "Player", "GOAT"])
-    assert list(goat.columns)[:7] == ["#", "Player", "GOAT", "Hardware",
-                                      "Production", "Titles",
+    goat = _table(at, ["#", "Player", "Role", "GOAT"])
+    assert list(goat.columns)[:8] == ["#", "Player", "Role", "GOAT",
+                                      "Hardware", "Production", "Titles",
                                       "Runner-up"]
     assert goat["Player"].iloc[0] == "V Kohli"
+    assert goat["Role"].iloc[0] == "batter"
     # The columns must add up -- that is the audit trail for the blend.
     assert abs(goat["GOAT"].iloc[0]
                - (goat["Hardware"].iloc[0]
@@ -134,8 +137,15 @@ def test_goat_rankings_blend_hardware_and_production():
     assert goat["GOAT"].iloc[0] == 100.0
     assert goat["GOAT"].max() <= 100.0
     assert int(goat["Titles"].iloc[0]) >= 1      # Kohli: 2 titles
+    # Role balance: the top 15 carries a real bowler (wicket-taking
+    # careers are judged on wickets + economy + average, not buried
+    # under run-scorers) and the top 25 covers all three roles.
+    top15 = set(goat["Role"].iloc[:15])
+    assert "bowler" in top15, sorted(goat["Role"].iloc[:15])
+    assert set(goat["Role"]) >= {"batter", "bowler", "all-rounder"}
     text = _text(at)
     assert "0-100 INDEX" in text                 # the rescale is stated
+    assert "ROLE-GATED" in text                  # the gating is stated
     assert "V Kohli" in text
 
 

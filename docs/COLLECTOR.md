@@ -24,7 +24,7 @@ python src/collector/cricsheet.py --out DIR    # write elsewhere
 | File | Contents |
 | --- | --- |
 | `data/ipl_seasons.json` | source, generated-utc stamp, meta counts, `team_aliases`, `venue_aliases`, per season: champion, points table (league phase), fixtures (incl. the decisive `winner`; ties/no-results are None), phase splits per team, Orange/Purple Cap tables, formula XI + MVP, replay odds; all-time `h2h`; the `backtest` (prior-season strengths vs real playoffs) |
-| `data/ipl_players.json` | source, stamp, `ladder_weights` + `goat_weights`, registry-keyed players: per-season lines (team, batting, bowling), career totals, PoM, titles, runner-ups, Orange/Purple Caps, ladder score, GOAT score with `goat_hardware` + `goat_production` subtotals |
+| `data/ipl_players.json` | source, stamp, `ladder_weights` + `goat_weights`, `goat_index` (max / leader / raw), registry-keyed players: per-season lines (team, batting, bowling incl. hauls, fielding), career totals incl. economy, bowling average, catches/stumpings/run outs, the role derived from the career gates, PoM, titles, runner-ups, Orange/Purple Caps, ladder score, GOAT score with `goat_hardware` + `goat_production` subtotals |
 
 Both are committed because Streamlit Cloud cannot run the collector; the
 app reads only these files and stamps their `_generated_utc` in the
@@ -35,12 +35,13 @@ sidebar.
 1. `load_matches` -- every zip member parsed to a normalized match:
    season year from the match DATE (labels are ambiguous: `2020/21` is
    the 2020 season), players keyed by `registry.people` ids, per-innings
-   batting/bowling splits with the extras and dismissal-kind rules (see
-   `docs/IPL.md`), plus runs/legal balls per over phase
+   batting/bowling/fielding splits with the extras and dismissal-kind
+   rules (see `docs/IPL.md`), plus runs/legal balls per over phase
    (powerplay/middle/death, by 0-based over index). A corrupt member is
    skipped, never fatal.
-2. `_line_accum` -- grows one batting/bowling line per (player, season),
-   shared by caps, journeys and careers.
+2. `_line_accum` -- grows one batting/bowling/fielding line per (player,
+   season), shared by caps, journeys and careers; four-fors and
+   five-fors are counted per INNINGS bowled.
 3. `season_table` -- official points + NRR (league phase only, all-out
    side credited the full quota).
 4. `season_fixtures` -- scoreline + result sentence per match
@@ -54,7 +55,10 @@ sidebar.
 8. `replay_backtest` -- the same model with an honest cutoff: strengths
    from the PRIOR season's NRR only (new franchise = 0.0), 1,000
    replays per season, predicted top four vs the real playoff teams.
-9. `_career_of` -- per-player totals + the published ladder score.
+9. `_career_of` -- per-player totals, the published ladder score, the
+   role gate (1000 runs / 30 wickets) and the role-gated GOAT blocks
+   (weights in `GOAT_ACCOLADES`); `build()` then rescales both blocks
+   onto the 0-100 index.
    Phase splits are summed per team per season along the way; venue and
    team label merges (`VENUE_ALIASES`, `TEAM_ALIASES`) are carried
    through so all-time views join on one canonical name.

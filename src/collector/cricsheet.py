@@ -180,20 +180,47 @@ GOAT_WEIGHTS = {
 # The rates were fixed against three published all-time lists (ipl.com
 # Aug 2026, CricketWinner Jul 2026, SportsboardIndia Feb 2026): those
 # rank individual output first and treat team trophies as seasoning,
-# so a squad ring can never outrank a decade of runs. Calibration
-# check on this dataset: ~7000 runs and ~200 wickets both land near
-# 80-100 raw points, and the raw points are then rescaled onto the
-# 0-100 index below (a wicket is worth 16/50 = 0.32, so 200 wickets
-# matches a 7000-run career at 12.0 per 1000).
+# so a squad ring can never outrank a decade of runs.
+# Production is ROLE-GATED: a player is only judged on the discipline
+# he actually practised as a job. A batter's four career wickets are
+# not a bowling record (Kohli), a bowler's nightwatchman runs are not
+# a batting record (Malinga), and a part-timer's two catches are not
+# a batting or bowling record at all. Everyone is judged on fielding,
+# because catches, stumpings and run outs are recorded dismissals.
+# Calibration check against those three lists (Spearman on the top 40):
+# role gating + fielding scores +0.65, up from +0.59 without them.
 GOAT_ACCOLADES = {
     "title": 6.0,             # took the field for the champion
     "runner_up": 3.0,         # took the field for the Final loser
     "orange_cap": 6.0,        # topped the season's run aggregate
     "purple_cap": 6.0,        # topped the season's wicket aggregate
     "player_of_match": 2.5,   # each official PoM award (counted once)
-    "runs_per_1000": 12.0,    # production term
-    "wickets_per_50": 16.0,   # production term
+    # -- production, batting (batters and all-rounders only) ----------
+    "runs_per_1000": 12.0,    # career runs at 1000 apiece
+    # -- production, bowling (bowlers and all-rounders only) ----------
+    "wickets_per_50": 16.0,   # career wickets at 50 apiece
+    "economy_weight": 6.0,    # points per run/under the par economy
+    "economy_par": 8.5,       # par IPL economy for the bonus
+    "average_weight": 3.0,    # points per run under the par average
+    "average_par": 28.0,      # par bowling average for the bonus
+    "four_wkts": 2.0,         # each 4-wicket haul in an innings
+    "five_wkts": 4.0,         # each 5-wicket haul in an innings
+    # -- production, fielding (everyone) -------------------------------
+    "catch": 0.15,            # each catch taken
+    "stumping": 0.3,          # each stumping (the keeper's dismissal)
+    "run_out": 0.3,           # each run out effected
 }
+# Role gates (published): a career of at least these numbers makes the
+# discipline count in the GOAT production block, and sets the role
+# label the app prints. Below both gates a player is a "part-timer"
+# and is scored on fielding only -- honest for a fringe player whose
+# 300 runs and 8 wickets are not a career-level discipline.
+GOAT_ROLE = {"bat_runs": 1000, "bowl_wkts": 30}
+# Bowling-quality qualifiers: the economy bonus needs 20 overs bowled
+# (one bad over can't wreck or save a rate), the average bonus needs
+# 50 wickets (an average on 5 wickets is noise).
+GOAT_ECON_MIN_BALLS = 120
+GOAT_AVG_MIN_WICKETS = 50
 # The GOAT rating is a 0-100 INDEX: every score is rescaled so the
 # all-time leader sits exactly at the top. Raw points stay published
 # in the payload (goat_index.raw), so the rescale stays auditable.
@@ -297,16 +324,30 @@ def load_matches(zip_path: str) -> list:
     return out
 
 
+def _field_credit(field: dict, player: str, kind: str) -> None:
+    """One recorded dismissal for the fielder credited with it."""
+    row = field.setdefault(player, {"catches": 0, "stumpings": 0,
+                                    "run_outs": 0})
+    row[kind] += 1
+
+
 def _parse_innings(inn: dict, people: dict) -> dict:
-    """One innings -> {team, runs, balls, all_out, bat{}, bowl{},
-    phases{}}: totals plus per-batter runs/balls/out/boundaries and
-    per-bowler balls, charged runs (wides + no-balls are the bowler's,
-    byes/leg-byes are not) and credited wickets, and run/ball counts per
-    over phase (powerplay/middle/death). Batting/bowling dicts key on
-    the registry's stable player id (display-name fallback), so a
-    Cricsheet spelling fix can never split a career."""
+    """One innings -> {team, runs, balls, all_out, bat{}, bowl{}, field{},
+    phases{}}: totals plus per-batter runs/balls/out/boundaries, per-bowler
+    balls, charged runs (wides + no-balls are the bowler's, byes/leg-byes
+    are not) and credited wickets, per-fielder catches/stumpings/run outs,
+    and run/ball counts per over phase (powerplay/middle/death).
+    Batting/bowling/fielding dicts key on the registry's stable player id
+    (display-name fallback), so a Cricsheet spelling fix can never split a
+    career. Fielding credits the FIRST fielder listed (multi-fielder
+    dismissals have no shared-credit rule in the data -- one name, the
+    first, is the honest pick); "caught and bowled" has no fielders
+    listed, so it is the bowler's own catch. A run out with no fielders
+    listed (direct hits: ~150 in the history) credits nobody -- we do
+    not guess."""
     bat: dict = {}
     bowl: dict = {}
+    field: dict = {}
     runs_total = 0
     legal_balls = 0
     dismissals = 0
@@ -352,10 +393,22 @@ def _parse_innings(inn: dict, people: dict) -> dict:
                         bat[who]["out"] = True
                 if kind not in BOWLER_NO_CREDIT and bowler:
                     bowl[bowler]["wickets"] += 1
+                listed = [people.get(f.get("name"), f.get("name"))
+                          for f in (w.get("fielders") or [])
+                          if f.get("name")]
+                first = listed[0] if listed else None
+                if kind == "caught" and first:
+                    _field_credit(field, first, "catches")
+                elif kind == "caught and bowled" and bowler:
+                    _field_credit(field, bowler, "catches")
+                elif kind == "stumped" and first:
+                    _field_credit(field, first, "stumpings")
+                elif kind == "run out" and first:
+                    _field_credit(field, first, "run_outs")
     return {"team": inn.get("team"), "runs": runs_total,
             "balls": legal_balls, "fell": dismissals,
             "all_out": dismissals >= 10, "bat": bat, "bowl": bowl,
-            "phases": phases}
+            "field": field, "phases": phases}
 
 
 def _overs(balls: int) -> str:
@@ -466,17 +519,21 @@ def season_fixtures(matches: list) -> list:
 
 
 def _line_accum(agg: dict, player: str, name: str, year: int,
-                team: str, bat: dict | None, bowl: dict | None) -> None:
-    """Grow the per-(player, season) batting/bowling line dicts shared by
-    the caps, the journeys and the careers. `player` is the registry id,
-    `name` the display name (last seen wins = most recent spelling)."""
+                team: str, bat: dict | None, bowl: dict | None,
+                field: dict | None = None) -> None:
+    """Grow the per-(player, season) batting/bowling/fielding line dicts
+    shared by the caps, the journeys and the careers. `player` is the
+    registry id, `name` the display name (last seen wins = most recent
+    spelling). A haul counts the innings it was taken in (4 wickets =
+    a four-for, 5 or more = a five-for, never both)."""
     line = agg.setdefault((player, year), {
         "name": name, "team": team,
         "batting": {"inns": 0, "runs": 0, "balls": 0, "hs": 0,
                     "not_outs": 0, "fours": 0, "sixes": 0, "fifties": 0,
                     "hundreds": 0},
         "bowling": {"inns": 0, "balls": 0, "runs": 0, "wickets": 0,
-                    "best": None}})
+                    "four_wkts": 0, "five_wkts": 0, "best": None},
+        "fielding": {"catches": 0, "stumpings": 0, "run_outs": 0}})
     line["team"] = team  # last team he turned out for that season
     if bat is not None:
         row = line["batting"]
@@ -495,11 +552,18 @@ def _line_accum(agg: dict, player: str, name: str, year: int,
         row["balls"] += bowl["balls"]
         row["runs"] += bowl["runs"]
         row["wickets"] += bowl["wickets"]
+        row["five_wkts"] += 1 if bowl["wickets"] >= 5 else 0
+        row["four_wkts"] += 1 if bowl["wickets"] == 4 else 0
         if (row["best"] is None
                 or bowl["wickets"] > row["best"][0]
                 or (bowl["wickets"] == row["best"][0]
                     and bowl["runs"] < row["best"][1])):
             row["best"] = [bowl["wickets"], bowl["runs"]]
+    if field is not None:
+        row = line["fielding"]
+        row["catches"] += field["catches"]
+        row["stumpings"] += field["stumpings"]
+        row["run_outs"] += field["run_outs"]
 
 
 def season_caps(season_matches: list, lines: dict) -> dict:
@@ -726,6 +790,19 @@ def replay_backtest(by_year: dict, seed: int = SIM_SEED,
                     "exact": exact}}
 
 
+def _role_of(agg: dict) -> str:
+    """The discipline a career was actually built on, from the
+    published gates (GOAT_ROLE): "batter", "bowler", "all-rounder"
+    (both gates passed) or "part-timer" (neither -- scored on fielding
+    only). Cricsheet carries no role column, so the gates ARE the
+    honest role: 1000 runs is a batting career, 30 wickets is a
+    bowling career."""
+    bat = agg["runs"] >= GOAT_ROLE["bat_runs"]
+    bowl = agg["wickets"] >= GOAT_ROLE["bowl_wkts"]
+    return ("all-rounder" if bat and bowl else "batter" if bat
+            else "bowler" if bowl else "part-timer")
+
+
 def _career_of(lines: dict, honours: dict, player: str,
                name: str) -> dict:
     """One player's all-time totals + both published scores from his
@@ -733,7 +810,10 @@ def _career_of(lines: dict, honours: dict, player: str,
     the GOAT score (weights in GOAT_ACCOLADES, split into a hardware
     subtotal and a production subtotal that sum to the total, so the
     blend stays auditable). `honours` maps each accolade kind to
-    {player: count}."""
+    {player: count}. Production is ROLE-GATED: batting counts only
+    past the runs gate, bowling only past the wicket gate (economy,
+    average and haul bonuses live inside that gate), fielding always
+    -- nobody is judged on a discipline he never practised."""
     titles = honours["titles"]
     runner_up = honours["runner_up"]
     oranges = honours["orange"]
@@ -744,9 +824,11 @@ def _career_of(lines: dict, honours: dict, player: str,
     agg = {"inns": 0, "runs": 0, "hs": 0, "not_outs": 0, "fours": 0,
            "sixes": 0, "fifties": 0, "hundreds": 0, "balls": 0,
            "balls_bowled": 0, "runs_charged": 0, "wickets": 0,
-           "best": None}
+           "four_wkts": 0, "five_wkts": 0, "catches": 0, "stumpings": 0,
+           "run_outs": 0, "best": None}
     for line in seasons.values():
         b, w = line["batting"], line["bowling"]
+        f = line["fielding"]
         agg["inns"] += b["inns"]
         agg["runs"] += b["runs"]
         agg["hs"] = max(agg["hs"], b["hs"])
@@ -759,6 +841,11 @@ def _career_of(lines: dict, honours: dict, player: str,
         agg["balls_bowled"] += w["balls"]
         agg["runs_charged"] += w["runs"]
         agg["wickets"] += w["wickets"]
+        agg["four_wkts"] += w["four_wkts"]
+        agg["five_wkts"] += w["five_wkts"]
+        agg["catches"] += f["catches"]
+        agg["stumpings"] += f["stumpings"]
+        agg["run_outs"] += f["run_outs"]
         if w["best"] and (agg["best"] is None
                           or w["best"][0] > agg["best"][0]
                           or (w["best"][0] == agg["best"][0]
@@ -774,20 +861,42 @@ def _career_of(lines: dict, honours: dict, player: str,
               "orange_cap": oranges.get(player, 0),
               "purple_cap": purples.get(player, 0),
               "player_of_match": poms.get(player, 0)}
-    # Hardware block (PoM counted ONCE, here) + production block (the
-    # GOAT config's run/wicket rates). Both subtotals round to 1dp and
-    # the total is their sum, so the columns always add up on screen.
-    # They are RAW points here; build() rescales them onto the 0-100
-    # index once every player's raw score is known.
-    hardware = round(sum(GOAT_ACCOLADES[k] * n for k, n in counts.items()),
-                     1)
-    production = round(
-        GOAT_ACCOLADES["runs_per_1000"] * agg["runs"] / 1000
-        + GOAT_ACCOLADES["wickets_per_50"] * agg["wickets"] / 50, 1)
+    role = _role_of(agg)
+    # Hardware block (PoM counted ONCE, here; role-neutral -- a title
+    # is a title whatever you did in the XI) + ROLE-GATED production.
+    # Both subtotals round to 1dp and the total is their sum, so the
+    # columns always add up on screen. They are RAW points here;
+    # build() rescales them onto the 0-100 index once every player's
+    # raw score is known.
+    w = GOAT_ACCOLADES
+    hardware = round(sum(w[k] * n for k, n in counts.items()), 1)
+    econ = (round(6.0 * agg["runs_charged"] / agg["balls_bowled"], 2)
+            if agg["balls_bowled"] else None)
+    bowl_avg = (round(agg["runs_charged"] / agg["wickets"], 2)
+                if agg["wickets"] else None)
+    prod = 0.0
+    if role in ("batter", "all-rounder"):
+        prod += w["runs_per_1000"] * agg["runs"] / 1000
+    if role in ("bowler", "all-rounder"):
+        prod += w["wickets_per_50"] * agg["wickets"] / 50
+        if (econ is not None
+                and agg["balls_bowled"] >= GOAT_ECON_MIN_BALLS):
+            prod += w["economy_weight"] * max(0.0, w["economy_par"] - econ)
+        if (bowl_avg is not None
+                and agg["wickets"] >= GOAT_AVG_MIN_WICKETS):
+            prod += w["average_weight"] * max(
+                0.0, w["average_par"] - bowl_avg)
+        prod += (w["four_wkts"] * agg["four_wkts"]
+                 + w["five_wkts"] * agg["five_wkts"])
+    prod += (w["catch"] * agg["catches"] + w["stumping"] * agg["stumpings"]
+             + w["run_out"] * agg["run_outs"])
+    production = round(prod, 1)
     goat = round(hardware + production, 1)
     return {"name": name, "seasons": {str(y): s for y, s in
                                      sorted(seasons.items())},
-            "career": {**agg, "best": agg["best"] or [0, 0]},
+            "role": role,
+            "career": {**agg, "econ": econ, "bowl_avg": bowl_avg,
+                       "best": agg["best"] or [0, 0]},
             "pom": counts["player_of_match"],
             "titles": counts["title"],
             "runner_up": counts["runner_up"],
@@ -851,6 +960,11 @@ def build(zip_path: str = None, out_dir: str = DATA_DIR,
             for player, bowl in (inn["bowl"] or {}).items():
                 _line_accum(lines, player, id_names.get(player, player),
                             m["year"], bowl_team, None, bowl)
+            # Fielding credit belongs to the FIELDING side, exactly
+            # like bowling -- the innings' team is the one batting.
+            for player, fld in (inn.get("field") or {}).items():
+                _line_accum(lines, player, id_names.get(player, player),
+                            m["year"], bowl_team, None, None, fld)
             bucket = phase_totals.setdefault(m["year"], {}).setdefault(
                 bat_team, {k: {"runs": 0, "balls": 0} for k in PHASE_KEYS})
             for pname, agg in (inn.get("phases") or {}).items():

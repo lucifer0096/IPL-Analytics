@@ -5,9 +5,13 @@ registry ids, overs/deliveries with extras and wicket kinds) at a tiny
 scale, so every rule the IPL app renders is pinned without network or a
 5 MB download: points + NRR (all-out quota, leg-byes excluded from
 bowler charges, wides included), result sentences (margin, super over,
-no result), the run-out/retired-hurt no-credit rule, franchise RENAME
-merging (successors stay separate), the formula XI qualifiers, the
-published ladder weights and the toy replay's reproducibility.
+no result), the run-out/retired-hurt no-credit rule, FIELDING credit
+(first fielder listed; c&b is the bowler's catch; a fielderless run
+out credits nobody), franchise RENAME merging (successors stay
+separate), the formula XI qualifiers, the published ladder weights,
+the ROLE-GATED GOAT production (batters judged on runs, bowlers on
+wickets + economy + average + hauls, everyone on fielding) and the toy
+replay's reproducibility.
 """
 
 import json
@@ -71,9 +75,12 @@ def _fixtures() -> dict:
              _d("A1", "bB1", 0), _d("A1", "bB1", 1),
              _d("A1", "bB1", 0), _d("A1", "bB1", 1)]],
          ), _inn("Beta", [
-            # B1 caught off bA2 (bowler credited), 5 off the over
+            # B1 caught off bA2 (bowler credited), 5 off the over; the
+            # catch is A1's -- fielding credit goes to the fielder
+            # listed, on the fielding side
             [_d("B1", "bA2", 1,
-                wickets=[{"kind": "caught", "player_out": "B1"}]),
+                wickets=[{"kind": "caught", "player_out": "B1",
+                          "fielders": [{"name": "A1"}]}]),
              _d("B1", "bA2", 0), _d("B1", "bA2", 2),
              _d("B1", "bA2", 1), _d("B1", "bA2", 0),
              _d("B1", "bA2", 1)],
@@ -90,7 +97,8 @@ def _fixtures() -> dict:
              _d("A1", "bB2", 1), _d("A1", "bB2", 0),
              _d("A1", "bB2", 2), _d("A1", "bB2", 1)],
             [_d("A1", "bB2", 1,
-                wickets=[{"kind": "caught", "player_out": "A1"}]),
+                wickets=[{"kind": "caught", "player_out": "A1",
+                          "fielders": [{"name": "bB1"}]}]),
              _d("A2", "bB2", 0), _d("A2", "bB2", 0),
              _d("A2", "bB2", 0), _d("A2", "bB2", 1),
              _d("A2", "bB2", 0)]],
@@ -98,9 +106,11 @@ def _fixtures() -> dict:
             [_d("B1", "bA3", 1), _d("B1", "bA3", 2),
              _d("B1", "bA3", 0), _d("B1", "bA3", 4),
              _d("B1", "bA3", 0), _d("B1", "bA3", 1)],
-            # a run out: NO bowler credit (dismissal still counted)
+            # a run out: NO bowler credit (dismissal still counted),
+            # but the fielder listed (bA2) IS credited with the out
             [_d("B1", "bA3", 0,
-                wickets=[{"kind": "run out", "player_out": "B2"}]),
+                wickets=[{"kind": "run out", "player_out": "B2",
+                          "fielders": [{"name": "bA2"}]}]),
              _d("B1", "bA3", 1), _d("B1", "bA3", 0),
              _d("B1", "bA3", 0), _d("B1", "bA3", 2),
              _d("B1", "bA3", 0)],
@@ -116,9 +126,19 @@ def _fixtures() -> dict:
         [_inn("Alpha", [[_d("A1", "G1", 4), _d("A1", "G1", 0),
                          _d("A1", "G1", 0), _d("A1", "G1", 0),
                          _d("A1", "G1", 0), _d("A1", "G1", 0)]]),
-         _inn("Gamma", [[_d("G1", "A2", 4), _d("G1", "A2", 0),
-                         _d("G1", "A2", 0), _d("G1", "A2", 0),
-                         _d("G1", "A2", 0), _d("G1", "A2", 0)]])],
+         _inn("Gamma", [
+            # caught and bowled: NO fielders listed in the record, so
+            # the bowler's own catch is the only honest credit
+            [_d("G1", "A2", 4,
+                wickets=[{"kind": "caught and bowled",
+                          "player_out": "G1"}]),
+             _d("G1", "A2", 0),
+             # stumped: the keeper listed (bA2) takes the credit
+             _d("G1", "A2", 0,
+                wickets=[{"kind": "stumped", "player_out": "G1",
+                          "fielders": [{"name": "bA2"}]}]),
+             _d("G1", "A2", 0), _d("G1", "A2", 0),
+             _d("G1", "A2", 0)]])],
         {"result": "tie", "eliminator": "Alpha"})
 
     m4 = _match(["Beta", "Gamma"], "2023", None, "2023-04-12", [],
@@ -270,6 +290,10 @@ def _lines(matches):
                 cricsheet._line_accum(
                     lines, player, id_names.get(player, player),
                     m["year"], bowl_team, None, bowl)
+            for player, fld in (inn.get("field") or {}).items():
+                cricsheet._line_accum(
+                    lines, player, id_names.get(player, player),
+                    m["year"], bowl_team, None, None, fld)
     return lines
 
 
@@ -295,19 +319,26 @@ def test_xi_mvp_and_ladder_weights(zip_path, monkeypatch):
         for p, n in (("aaa1", "A1"), ("bbb1", "B1"))}
     assert careers["aaa1"]["ladder"] == 0.59
     assert careers["bbb1"]["ladder"] == 1.57      # 3x23/1000 + 0.5 + 1.0
-    # GOAT = hardware + production: A1 lost the Final + wore an Orange
-    # Cap + one PoM (3+6+2.5) over 30 runs (12x30/1000); B1 won the
-    # title + one PoM (6+2.5) over 23 runs. Subtotals sum to the total.
+    # GOAT = hardware + production. Role gating bites first: A1's 30
+    # runs and B1's 23 are BOTH under the 1000-run career gate, so
+    # neither is a batter and neither scores a run of production --
+    # while the LADDER above still counts those runs (the ladder is
+    # career output; the GOAT is role-gated production). A1's one
+    # catch (m1) is the only production in the fixture: 0.15 -> 0.1.
     # These are the RAW points _career_of always reports; build() then
     # rescales them onto the 0-100 index (see the build test below).
+    assert careers["aaa1"]["role"] == "part-timer"
+    assert careers["bbb1"]["role"] == "part-timer"
+    assert careers["aaa1"]["career"]["catches"] == 1
+    assert careers["bbb1"]["career"]["catches"] == 0
     assert careers["aaa1"]["goat_hardware"] == 11.5
-    assert careers["aaa1"]["goat_production"] == 0.4
-    assert careers["aaa1"]["goat"] == 11.9
+    assert careers["aaa1"]["goat_production"] == 0.1
+    assert careers["aaa1"]["goat"] == 11.6
     assert careers["aaa1"]["runner_up"] == 1
     assert careers["aaa1"]["orange"] == 1
     assert careers["bbb1"]["goat_hardware"] == 8.5
-    assert careers["bbb1"]["goat_production"] == 0.3
-    assert careers["bbb1"]["goat"] == 8.8
+    assert careers["bbb1"]["goat_production"] == 0.0
+    assert careers["bbb1"]["goat"] == 8.5
     assert careers["bbb1"]["titles"] == 1
     assert (careers["aaa1"]["goat_hardware"]
             + careers["aaa1"]["goat_production"]
@@ -337,6 +368,156 @@ def test_goat_index_rescales_onto_100():
         assert p["goat"] == round(p["goat_hardware"] + p["goat_production"], 1)
     # no players at all: no crash, no invented leader
     assert cricsheet._goat_index({}) == 0.0
+
+
+def test_fielding_credit_rules():
+    """Every recorded dismissal credits the FIRST fielder listed (the
+    record has no shared-credit rule, so one name is the honest
+    pick), "caught and bowled" has no fielders listed and is the
+    bowler's own catch, and a run out with no fielders listed -- a
+    direct hit -- credits NOBODY. The bowler is credited only for the
+    kinds that credit a bowler (caught, c&b, stumped, lbw here)."""
+    people = {"Batter": "bat1", "Keeper": "kee1", "Fielder": "fie1",
+              "Bowler": "bow1", "Slip": "sli1"}
+
+    def ball(kind, fielders=None):
+        w = {"kind": kind, "player_out": "Batter"}
+        if fielders is not None:
+            w["fielders"] = [{"name": f} for f in fielders]
+        return {"batter": "Batter", "bowler": "Bowler",
+                "non_striker": "Keeper",
+                "runs": {"batter": 0, "extras": 0, "total": 0},
+                "wickets": [w]}
+
+    inn = {"team": "Alpha", "overs": [{"over": 0, "deliveries": [
+        ball("caught", ["Slip", "Fielder"]),   # first name only
+        ball("caught and bowled"),             # the bowler's own catch
+        ball("stumped", ["Keeper"]),
+        ball("run out", ["Fielder"]),
+        ball("run out"),                       # direct hit: no credit
+        ball("lbw"),
+    ]}]}
+    parsed = cricsheet._parse_innings(inn, people)
+    assert parsed["field"] == {
+        "sli1": {"catches": 1, "stumpings": 0, "run_outs": 0},
+        "bow1": {"catches": 1, "stumpings": 0, "run_outs": 0},
+        "kee1": {"catches": 0, "stumpings": 1, "run_outs": 0},
+        "fie1": {"catches": 0, "stumpings": 0, "run_outs": 1},
+    }
+    # run outs credit no bowler; the other four kinds do
+    assert parsed["bowl"]["bow1"]["wickets"] == 4
+
+
+def test_hauls_count_innings_not_wickets():
+    """A haul is an INNINGS: 4 wickets is a four-for, 5 or more is a
+    five-for (never both for one innings), summed over the career."""
+    lines: dict = {}
+    cricsheet._line_accum(lines, "p", "P", 2020, "Alpha", None,
+                          {"balls": 24, "runs": 30, "wickets": 4})
+    cricsheet._line_accum(lines, "p", "P", 2020, "Alpha", None,
+                          {"balls": 24, "runs": 40, "wickets": 5})
+    cricsheet._line_accum(lines, "p", "P", 2021, "Alpha", None,
+                          {"balls": 24, "runs": 20, "wickets": 6})
+    bowl = lines[("p", 2020)]["bowling"]
+    assert (bowl["four_wkts"], bowl["five_wkts"]) == (1, 1)
+    assert bowl["wickets"] == 9
+    bowl = lines[("p", 2021)]["bowling"]
+    assert (bowl["four_wkts"], bowl["five_wkts"]) == (0, 1)  # 6 = five-for
+
+
+def _flat_line(name, runs=0, balls=0, wkts=0, bb=0, charged=0,
+               catches=0, stumpings=0, run_outs=0, four=0, five=0):
+    """One season line in _line_accum's shape, for the role tests."""
+    return {("p", 2020): {
+        "name": name, "team": "Alpha",
+        "batting": {"inns": 1, "runs": runs, "balls": balls,
+                    "hs": runs, "not_outs": 0, "fours": 0, "sixes": 0,
+                    "fifties": 0, "hundreds": 0},
+        "bowling": {"inns": 1, "balls": bb, "runs": charged,
+                    "wickets": wkts, "four_wkts": four,
+                    "five_wkts": five, "best": [wkts, charged]},
+        "fielding": {"catches": catches, "stumpings": stumpings,
+                     "run_outs": run_outs}}}
+
+
+NO_HONOURS = {"titles": {}, "runner_up": {}, "orange": {},
+              "purple": {}, "pom": {}}
+
+
+def test_role_gates_production_disciplines():
+    """The published role rule, pin by pin: batting counts only past
+    the 1000-run gate, bowling only past the 30-wicket gate (with the
+    economy bonus needing 20 overs and the average bonus needing 50
+    wickets), fielding counts for everyone, and the role label follows
+    the same gates. Every production number below is hand-computed
+    from GOAT_ACCOLADES."""
+    w = cricsheet.GOAT_ACCOLADES
+    # Batter: 9000 runs, a FOUR-WICKET, 7.50-economy bowling spell --
+    # and none of it counts, because 4 wickets is not a bowling career.
+    batter = cricsheet._career_of(
+        _flat_line("Batter", runs=9000, balls=7000, wkts=4, bb=240,
+                   charged=300, catches=100, stumpings=0, run_outs=20),
+        NO_HONOURS, "p", "Batter")
+    assert batter["role"] == "batter"
+    assert batter["career"]["econ"] == 7.5
+    assert batter["goat_production"] == round(
+        w["runs_per_1000"] * 9.0 + w["catch"] * 100 + w["run_out"] * 20,
+        1)                                    # 108 + 15 + 6 = 129.0
+    assert batter["goat_production"] == 129.0
+    # Bowler: 88 runs (not a batting career), 170 wickets at 7.15 an
+    # over and a 25.24 average, 6 four-fors and a five-for, plus 21
+    # catches and 6 run outs (fielding pays whatever your role).
+    bowler = cricsheet._career_of(
+        _flat_line("Bowler", runs=88, balls=75, wkts=170, bb=3600,
+                   charged=4290, four=6, five=1, catches=21,
+                   run_outs=6),
+        NO_HONOURS, "p", "Bowler")
+    assert bowler["role"] == "bowler"
+    assert bowler["career"]["bowl_avg"] == 25.24
+    expected = (w["wickets_per_50"] * 170 / 50
+                + w["economy_weight"] * (w["economy_par"] - 7.15)
+                + w["average_weight"] * (w["average_par"] - 25.24)
+                + w["four_wkts"] * 6 + w["five_wkts"] * 1
+                + w["catch"] * 21 + w["run_out"] * 6)
+    assert bowler["goat_production"] == round(expected, 1)   # 91.7
+    assert bowler["goat_production"] == 91.7
+    # All-rounder: BOTH gates pass, so both disciplines pay, plus the
+    # bowling quality bonuses and fielding on top.
+    ar = cricsheet._career_of(
+        _flat_line("AR", runs=3526, balls=2600, wkts=180, bb=3000,
+                   charged=3855, four=3, five=1, catches=111,
+                   run_outs=20),
+        NO_HONOURS, "p", "AR")
+    assert ar["role"] == "all-rounder"
+    expected = (w["runs_per_1000"] * 3.526 + w["wickets_per_50"] * 180 / 50
+                + w["economy_weight"] * (w["economy_par"] - 7.71)
+                + w["average_weight"] * (w["average_par"] - 21.42)
+                + w["four_wkts"] * 3 + w["five_wkts"] * 1
+                + w["catch"] * 111 + w["run_out"] * 20)
+    assert ar["goat_production"] == round(expected, 1)       # 157.0
+    assert ar["goat_production"] == 157.0
+    # Part-timer: 400 runs and 8 wickets are neither a batting nor a
+    # bowling career -- fielding is all that counts.
+    part = cricsheet._career_of(
+        _flat_line("Part", runs=400, balls=300, wkts=8, bb=120,
+                   charged=96, catches=22, run_outs=3),
+        NO_HONOURS, "p", "Part")
+    assert part["role"] == "part-timer"
+    assert part["goat_production"] == round(
+        w["catch"] * 22 + w["run_out"] * 3, 1)               # 4.2
+    assert part["goat_production"] == 4.2
+    # Qualifier edges: a bowler-role player (30 wickets) with only 19
+    # overs gets NO economy bonus, and 30 wickets is short of the 50
+    # needed for an average bonus -- the wicket rate pays, nothing
+    # else. (His economy is a silly 6.0 on purpose: it must not count.)
+    tiny = cricsheet._career_of(
+        _flat_line("Tiny", runs=12, balls=9, wkts=30, bb=114,
+                   charged=114),
+        NO_HONOURS, "p", "Tiny")
+    assert tiny["role"] == "bowler"
+    assert tiny["goat_production"] == round(
+        w["wickets_per_50"] * 30 / 50, 1)                    # 9.6
+    assert tiny["goat_production"] == 9.6
 
 
 def test_replay_odds_reproducible_and_conservative(zip_path):
@@ -486,15 +667,27 @@ def test_build_writes_attributed_payloads(zip_path, tmp_path):
     # lost it (runner-up), topped the 2024 runs (Orange Cap), and B1's
     # Beta won it (title); 2023's caps went to DD1/A2 by the same rule.
     assert a1["runner_up"] == 1 and a1["orange"] == 1
-    # The GOAT rating is a 0-100 INDEX: the raw leader (A1, 11.9 raw
-    # points) is rescaled to exactly 100 and every other score follows
-    # the SAME factor, so the two subtotals still sum to the total.
+    # The GOAT rating is a 0-100 INDEX: the raw leader (A1, 11.6 raw
+    # points: 11.5 hardware + 0.1 for his one catch) is rescaled to
+    # exactly 100 and every other score follows the SAME factor, so
+    # the two subtotals still sum to the total.
     index = players["goat_index"]
-    assert index == {"max": 100.0, "leader": "A1", "raw": 11.9}
+    assert index == {"max": 100.0, "leader": "A1", "raw": 11.6}
     factor = 100.0 / index["raw"]
-    assert a1["goat_hardware"] == round(11.5 * factor, 1)   # 96.6
-    assert a1["goat_production"] == round(0.4 * factor, 1)  # 3.4
+    assert a1["goat_hardware"] == round(11.5 * factor, 1)   # 99.1
+    assert a1["goat_production"] == round(0.1 * factor, 1)  # 0.9
     assert a1["goat"] == 100.0 == index["max"]
+    # Role and fielding survive into the payload: A1 is a part-timer
+    # (30 runs, under the 1000-run gate), the run out and the stumping
+    # landed on bA2 (xxx2), and the caught-and-bowled on the bowler.
+    assert a1["role"] == "part-timer"
+    assert a1["career"]["catches"] == 1
+    assert a1["career"]["econ"] is None      # never bowled
+    b_a2 = players["players"]["xxx2"]
+    assert b_a2["career"]["run_outs"] == 1
+    assert b_a2["career"]["stumpings"] == 1
+    assert b_a2["career"]["econ"] is not None
+    assert players["players"]["aaa2"]["career"]["catches"] == 1
     assert a1["goat"] == a1["goat_hardware"] + a1["goat_production"]
     # Nobody outscores the index max, and the runner-up (B1) is lower.
     assert max(p["goat"] for p in players["players"].values()) == 100.0

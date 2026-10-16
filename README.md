@@ -33,14 +33,18 @@ silent the UI says so.
 - **Official math, printed.** Points (win 2 / tie 1 each / no result 1
   each), NRR with a bowled-out side credited the full 20-over quota,
   bowler charges including wides and no-balls but not byes or leg-byes,
-  wicket credit excluding run outs and retirements. Every formula shown
-  in the UI is the formula the collector computes.
+  wicket credit excluding run outs and retirements. Fielding credit
+  goes to the first fielder listed (caught and bowled to the bowler; a
+  fielderless direct-hit run out to nobody). Every formula shown in
+  the UI is the formula the collector computes.
 - **One published weights config.** The all-time ladder, the season XI
   and the MVP all run off `GOAT_WEIGHTS` in
   `src/collector/cricsheet.py`; the GOAT Rankings tab runs off
-  `GOAT_ACCOLADES` (a hardware block plus a production block, reported
-  as two columns that sum to the score). Change a config, everything
-  recomputes, the tests pin the schema.
+  `GOAT_ACCOLADES` (a hardware block plus a ROLE-GATED production
+  block -- batters on runs, bowlers on wickets + economy + average +
+  hauls, everyone on catches, stumpings and run outs -- reported as
+  two columns that sum to the score, rescaled onto a 0-100 index).
+  Change a config, everything recomputes, the tests pin the schema.
 - **The replay owns its label.** The Season Replay tab is a toy: team
   strength is the actual NRR gap through a logistic curve, no form,
   injuries or home advantage. It prints its method, its seed and its

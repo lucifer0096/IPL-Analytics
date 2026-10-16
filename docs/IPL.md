@@ -91,29 +91,56 @@ ladder = 3.0 x (runs / 1000)
        + 1.0 x titles (seasons taking the field for the champion)
 ```
 
-### GOAT rankings (hardware + production)
+### GOAT rankings (hardware + role-gated production)
 
 A separate config, `GOAT_ACCOLADES`, ranks players on two auditable
 blocks that the tab shows as separate columns summing to the score:
 
 ```
-GOAT = HARDWARE
-     + 30.0 x titles        (took the field for the champion)
-     + 12.0 x finals lost   (took the field for the Final loser)
-     + 15.0 x Orange Caps   (topped the season's run aggregate)
-     + 15.0 x Purple Caps   (topped the season's wicket aggregate)
-     +  2.0 x player-of-the-match awards (official, counted once)
-     + PRODUCTION           (the ladder's own rates)
-     +  3.0 x (runs / 1000)
-     +  3.0 x (wickets / 50)
+GOAT = HARDWARE                  (what the official record says he won)
+     +  6.0 x titles             (took the field for the champion)
+     +  3.0 x finals lost        (took the field for the Final loser)
+     +  6.0 x Orange Caps        (topped the season's run aggregate)
+     +  6.0 x Purple Caps        (topped the season's wicket aggregate)
+     +  2.5 x player-of-the-match awards (official, counted once)
+     + PRODUCTION                (role-gated output + fielding, below)
+     + 12.0 x (runs / 1000)          batters and all-rounders only
+     + 16.0 x (wickets / 50)         bowlers and all-rounders only
+     +  6.0 x max(0, 8.5 - economy)  bowlers, 20+ overs bowled
+     +  3.0 x max(0, 28 - average)   bowlers, 50+ wickets
+     +  2.0 per four-for  +  4.0 per five-for   (per innings bowled)
+     +  0.15 x catches + 0.3 x stumpings + 0.3 x run outs  (everyone)
 ```
 
-Hardware leads (the production block reuses the ladder's small rates,
-so a title still outruns a season of runs), but career output is never
-worth zero: 9,346 runs should move a player, and the columns let a
-reader check every point of the blend.
+**Role gating.** Cricsheet carries no role column, so the career gates
+ARE the published role: 1000+ career runs makes a batter, 30+ career
+wickets makes a bowler, passing both makes an all-rounder, and failing
+both makes a part-timer (scored on fielding only). Nobody is judged on
+a discipline he never practised as a job: Kohli's four career wickets
+at a 92.0 average are not a bowling record, Malinga's 88 runs are not
+a batting record, and Jadeja is paid for batting, bowling and catching
+alike. The economy bonus needs 20 overs bowled and the average bonus
+needs 50 wickets, so one good spell (or one bad one) cannot decide a
+career rate.
 
-Three honesty rules the rankings tab prints:
+**The rating is a 0-100 index.** Raw points from the two blocks are
+rescaled by one factor -- `GOAT_INDEX_MAX / the raw leader's score`,
+the raw leader travelling in the payload as `goat_index.raw` -- so the
+all-time leader sits exactly at 100 and both subtotals scale together,
+keeping Hardware + Production equal to GOAT on screen.
+
+**Calibration against published lists.** The weights were fixed
+against three published all-time top tens (ipl.com Aug 2026,
+CricketWinner Jul 2026, SportsboardIndia Feb 2026) by Spearman rank
+correlation over their combined order: the role-gated, fielding-aware
+config scores +0.65, up from +0.59 for the previous run/wicket-only
+blend and +0.56 for the original hardware-led config. On this dataset
+it ranks Kohli, Jadeja, Dhoni, Narine and Rohit on top, with Bhuvneshwar
+Kumar, Malinga, Chahal and Bumrah all inside the top 15 (wicket-taking
+careers are no longer buried under run-scorers) and hardware-heavy
+candidates such as Ambati Rayudu outside the top 20.
+
+Four honesty rules the rankings tab prints:
 
 - The **official IPL Most Valuable Player** is a voted prize that
   Cricsheet does not carry, so it cannot count. Rather than invent it,
@@ -122,6 +149,11 @@ Three honesty rules the rankings tab prints:
   count either -- the rankings use only awards the record itself
   establishes.
 - Player-of-the-match is counted **once** (in hardware), not twice.
+- Fielding credit goes to the **first fielder listed** on a
+  multi-fielder dismissal, "caught and bowled" is the bowler's own
+  catch (the record lists no fielders for it), and a run out with no
+  fielders listed (a direct hit) credits **nobody** -- the app does
+  not guess.
 
 ### Player card (generated avatar)
 
@@ -129,9 +161,10 @@ Cricsheet carries ball-by-ball data, no photos, and real cricket
 headshots are other people's copyright -- so the Journey tab draws a
 trading-card style player card instead: the player's initials on a
 gradient in his last team's brand colours (a stable hash-derived hue
-for anything unlisted), his season span and last team, and every
-published number as chips: career, hardware counts, ladder and the
-GOAT blend with both subtotals spelled out on the card.
+for anything unlisted), his season span, last team and career role,
+and every published number as chips: career (runs, wickets, catches,
+stumpings, run outs, economy, average), hardware counts, ladder and
+the GOAT blend with both subtotals spelled out on the card.
 
 ### Season Replay (TOY model, labelled as such)
 
