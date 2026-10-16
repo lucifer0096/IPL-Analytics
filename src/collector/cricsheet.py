@@ -41,10 +41,13 @@ plain sum over the deliveries -- no ratings, no modelled form:
 - GOAT rankings          (hardware + production, published as a 0-100
                           index: titles, finals lost, Orange / Purple
                           Caps, official player-of-the-match awards,
-                          plus career runs/wickets at GOAT_ACCOLADES'
-                          own rates, rescaled so the all-time leader
-                          sits at the top of the index, reported as two
-                          auditable subtotals per player)
+                          plus career runs/wickets, a strike-rate
+                          premium and quality bonuses measured against
+                          the ERA the career spanned, at
+                          GOAT_ACCOLADES' own rates, rescaled so the
+                          all-time leader sits at the top of the
+                          index, reported as two auditable subtotals
+                          per player)
 - season replay odds     (a clearly-labelled TOY model: P(A beats B) =
                           logistic(2 * NRR gap), 5k replays, fixed seed;
                           it is a probability lesson on the official
@@ -188,7 +191,8 @@ GOAT_WEIGHTS = {
 # a batting or bowling record at all. Everyone is judged on fielding,
 # because catches, stumpings and run outs are recorded dismissals.
 # Calibration check against those three lists (Spearman on the top 40):
-# role gating + fielding scores +0.65, up from +0.59 without them.
+# role gating + fielding + era pars + the strike-rate premium score
+# +0.66, up from +0.59 before any of them.
 GOAT_ACCOLADES = {
     "title": 6.0,             # took the field for the champion
     "runner_up": 3.0,         # took the field for the Final loser
@@ -197,10 +201,12 @@ GOAT_ACCOLADES = {
     "player_of_match": 2.5,   # each official PoM award (counted once)
     # -- production, batting (batters and all-rounders only) ----------
     "runs_per_1000": 12.0,    # career runs at 1000 apiece
+    "sr_weight": 0.5,         # points per strike-rate point above par
+    "sr_par": 130.0,          # fallback par when no league seasons fit
     # -- production, bowling (bowlers and all-rounders only) ----------
     "wickets_per_50": 16.0,   # career wickets at 50 apiece
     "economy_weight": 6.0,    # points per run/under the par economy
-    "economy_par": 8.5,       # par IPL economy for the bonus
+    "economy_par": 8.5,       # fallback par when no league seasons fit
     "average_weight": 3.0,    # points per run under the par average
     "average_par": 28.0,      # par bowling average for the bonus
     "four_wkts": 2.0,         # each 4-wicket haul in an innings
@@ -221,6 +227,21 @@ GOAT_ROLE = {"bat_runs": 1000, "bowl_wkts": 30}
 # 50 wickets (an average on 5 wickets is noise).
 GOAT_ECON_MIN_BALLS = 120
 GOAT_AVG_MIN_WICKETS = 50
+# The batting-impact qualifier: the strike-rate premium needs 2000
+# career balls faced (~28 full innings) -- a rate on a five-game
+# sample is noise, exactly like the 20 overs above.
+GOAT_SR_MIN_BALLS = 2000
+# Both rate bonuses are measured against ERAS, not one fixed number.
+# The economy par is the league economy of the seasons a bowler
+# actually bowled in (ball-weighted), the strike-rate par the league
+# strike rate of the seasons a batter actually batted in. League
+# scoring swung from 7.9 an over in 2008-11 to 9.5-9.9 in 2023-26
+# (strike rate from ~120 to ~155), so a single fixed par would hand
+# early-era bowlers a bonus for being ordinary and deny modern bowlers
+# one for being a run above theirs. build() computes the league rates
+# from the same matches; the fallbacks live in GOAT_ACCOLADES for
+# tests and builds without them, and every player's pars publish in
+# the payload (career.econ_par / career.sr_par) for audit.
 # The GOAT rating is a 0-100 INDEX: every score is rescaled so the
 # all-time leader sits exactly at the top. Raw points stay published
 # in the payload (goat_index.raw), so the rescale stays auditable.
@@ -804,16 +825,21 @@ def _role_of(agg: dict) -> str:
 
 
 def _career_of(lines: dict, honours: dict, player: str,
-               name: str) -> dict:
+               name: str, league: dict = None) -> dict:
     """One player's all-time totals + both published scores from his
     season lines: the PRODUCTION ladder (weights in GOAT_WEIGHTS) and
     the GOAT score (weights in GOAT_ACCOLADES, split into a hardware
     subtotal and a production subtotal that sum to the total, so the
     blend stays auditable). `honours` maps each accolade kind to
     {player: count}. Production is ROLE-GATED: batting counts only
-    past the runs gate, bowling only past the wicket gate (economy,
-    average and haul bonuses live inside that gate), fielding always
-    -- nobody is judged on a discipline he never practised."""
+    past the runs gate (runs AND the strike-rate premium), bowling
+    only past the wicket gate (economy, average and haul bonuses live
+    inside that gate), fielding always -- nobody is judged on a discipline
+    he never practised. `league` maps "econ"/"sr" to {season: league
+    rate}; each rate bonus is measured against the ball-weighted par
+    of THIS player's own seasons (era fairness, see GOAT_SR_MIN_BALLS)
+    and falls back to the config's fixed pars when the league rates
+    are absent -- whichever par was used publishes in the payload."""
     titles = honours["titles"]
     runner_up = honours["runner_up"]
     oranges = honours["orange"]
@@ -874,14 +900,42 @@ def _career_of(lines: dict, honours: dict, player: str,
             if agg["balls_bowled"] else None)
     bowl_avg = (round(agg["runs_charged"] / agg["wickets"], 2)
                 if agg["wickets"] else None)
+    # Era pars -- the league rates of the seasons HE played, weighted by
+    # his own balls, so nobody is measured on someone else's scoring
+    # environment. Whatever par the bonuses below actually use (era or,
+    # with no league rates, the config fallback) is what the payload
+    # publishes, so the score stays auditable line by line.
+    league = league or {}
+    econ_par, den = 0.0, 0
+    for y, line in seasons.items():
+        balls = line["bowling"]["balls"]
+        if balls and str(y) in (league.get("econ") or {}):
+            econ_par += league["econ"][str(y)] * balls
+            den += balls
+    econ_par = round(econ_par / den, 2) if den else w["economy_par"]
+    sr_par, sden = 0.0, 0
+    for y, line in seasons.items():
+        balls = line["batting"]["balls"]
+        if balls and str(y) in (league.get("sr") or {}):
+            sr_par += league["sr"][str(y)] * balls
+            sden += balls
+    sr_par = round(sr_par / sden, 1) if sden else w["sr_par"]
+    sr = (round(100.0 * agg["runs"] / agg["balls"], 1)
+          if agg["balls"] else None)
     prod = 0.0
     if role in ("batter", "all-rounder"):
         prod += w["runs_per_1000"] * agg["runs"] / 1000
+        # Scoring-rate premium: impact batting above his era's rate.
+        # The volume is already paid per 1000 runs above -- this pays
+        # the RATE, qualified by GOAT_SR_MIN_BALLS so a five-game
+        # slog can't buy points.
+        if sr is not None and agg["balls"] >= GOAT_SR_MIN_BALLS:
+            prod += w["sr_weight"] * max(0.0, sr - sr_par)
     if role in ("bowler", "all-rounder"):
         prod += w["wickets_per_50"] * agg["wickets"] / 50
         if (econ is not None
                 and agg["balls_bowled"] >= GOAT_ECON_MIN_BALLS):
-            prod += w["economy_weight"] * max(0.0, w["economy_par"] - econ)
+            prod += w["economy_weight"] * max(0.0, econ_par - econ)
         if (bowl_avg is not None
                 and agg["wickets"] >= GOAT_AVG_MIN_WICKETS):
             prod += w["average_weight"] * max(
@@ -896,6 +950,7 @@ def _career_of(lines: dict, honours: dict, player: str,
                                      sorted(seasons.items())},
             "role": role,
             "career": {**agg, "econ": econ, "bowl_avg": bowl_avg,
+                       "econ_par": econ_par, "sr": sr, "sr_par": sr_par,
                        "best": agg["best"] or [0, 0]},
             "pom": counts["player_of_match"],
             "titles": counts["title"],
@@ -940,6 +995,7 @@ def build(zip_path: str = None, out_dir: str = DATA_DIR,
     purples: dict = {}        # topped a season's wicket aggregate
     id_names: dict = {}       # registry id -> latest display name
     phase_totals: dict = {}   # year -> team (as played) -> phase -> agg
+    env_by_year: dict = {}    # year -> [charged, bowl balls, runs, balls]
     for m in matches:
         by_year.setdefault(m["year"], []).append(m)
         if m.get("pom"):
@@ -954,10 +1010,19 @@ def build(zip_path: str = None, out_dir: str = DATA_DIR,
             # counting for bowlers).
             bowl_team = next((t for t in m["teams"] if t != bat_team),
                              bat_team)
+            # The league scoring environment this season (era pars):
+            # charged runs / legal balls for economy, batter runs /
+            # legal balls for strike rate -- summed alongside the
+            # per-player lines from the same innings.
+            env = env_by_year.setdefault(m["year"], [0, 0, 0, 0])
             for player, bat in (inn["bat"] or {}).items():
+                env[2] += bat["runs"]
+                env[3] += bat["balls"]
                 _line_accum(lines, player, id_names.get(player, player),
                             m["year"], bat_team, bat, None)
             for player, bowl in (inn["bowl"] or {}).items():
+                env[0] += bowl["runs"]
+                env[1] += bowl["balls"]
                 _line_accum(lines, player, id_names.get(player, player),
                             m["year"], bowl_team, None, bowl)
             # Fielding credit belongs to the FIELDING side, exactly
@@ -970,6 +1035,14 @@ def build(zip_path: str = None, out_dir: str = DATA_DIR,
             for pname, agg in (inn.get("phases") or {}).items():
                 bucket[pname]["runs"] += agg["runs"]
                 bucket[pname]["balls"] += agg["balls"]
+    # Each season's league economy / strike rate -- the era pars every
+    # GOAT rate bonus is measured against (_career_of ball-weights them
+    # per player by season STRING, the payload's key format; the
+    # schedule itself publishes for audit).
+    league = {"econ": {str(y): 6.0 * e[0] / e[1]
+                       for y, e in env_by_year.items() if e[1]},
+              "sr": {str(y): 100.0 * e[2] / e[3]
+                     for y, e in env_by_year.items() if e[3]}}
     champions = {y: next((m["winner"] for m in ms
                           if m["stage"] == "Final" and m["winner"]),
                          None)
@@ -1017,7 +1090,7 @@ def build(zip_path: str = None, out_dir: str = DATA_DIR,
                "orange": oranges, "purple": purples, "pom": poms}
     for player, name in names.items():
         players_payload[player] = _career_of(lines, honours,
-                                             player, name)
+                                             player, name, league)
     # Raw points -> published 0-100 index (the leader sits at the top);
     # the raw leader score travels in the payload so the rescale is
     # auditable on the rankings tab.
@@ -1039,6 +1112,11 @@ def build(zip_path: str = None, out_dir: str = DATA_DIR,
                    "goat_index": {"max": GOAT_INDEX_MAX,
                                   "leader": index_leader["name"],
                                   "raw": raw_leader},
+                   "league_rates": {
+                       "econ": {y: round(v, 2)
+                                for y, v in sorted(league["econ"].items())},
+                       "sr": {y: round(v, 1)
+                              for y, v in sorted(league["sr"].items())}},
                    "players": players_payload}
     os.makedirs(out_dir, exist_ok=True)
     for name, doc in (("ipl_seasons.json", seasons_doc),

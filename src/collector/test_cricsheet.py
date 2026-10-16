@@ -460,6 +460,10 @@ def test_role_gates_production_disciplines():
         NO_HONOURS, "p", "Batter")
     assert batter["role"] == "batter"
     assert batter["career"]["econ"] == 7.5
+    # SR 128.6 sits BELOW the 130.0 fallback par, so the strike-rate
+    # premium adds nothing here -- only above-par rate pays.
+    assert batter["career"]["sr"] == 128.6
+    assert batter["career"]["sr_par"] == 130.0
     assert batter["goat_production"] == round(
         w["runs_per_1000"] * 9.0 + w["catch"] * 100 + w["run_out"] * 20,
         1)                                    # 108 + 15 + 6 = 129.0
@@ -482,20 +486,24 @@ def test_role_gates_production_disciplines():
     assert bowler["goat_production"] == round(expected, 1)   # 91.7
     assert bowler["goat_production"] == 91.7
     # All-rounder: BOTH gates pass, so both disciplines pay, plus the
-    # bowling quality bonuses and fielding on top.
+    # bowling quality bonuses, the strike-rate premium (3526 off 2600
+    # balls = 135.6, a par-130 league season -> 0.5 * 5.6 = +2.8) and
+    # fielding on top.
     ar = cricsheet._career_of(
         _flat_line("AR", runs=3526, balls=2600, wkts=180, bb=3000,
                    charged=3855, four=3, five=1, catches=111,
                    run_outs=20),
         NO_HONOURS, "p", "AR")
     assert ar["role"] == "all-rounder"
+    assert ar["career"]["sr"] == 135.6
     expected = (w["runs_per_1000"] * 3.526 + w["wickets_per_50"] * 180 / 50
+                + w["sr_weight"] * (135.6 - w["sr_par"])
                 + w["economy_weight"] * (w["economy_par"] - 7.71)
                 + w["average_weight"] * (w["average_par"] - 21.42)
                 + w["four_wkts"] * 3 + w["five_wkts"] * 1
                 + w["catch"] * 111 + w["run_out"] * 20)
-    assert ar["goat_production"] == round(expected, 1)       # 157.0
-    assert ar["goat_production"] == 157.0
+    assert ar["goat_production"] == round(expected, 1)       # 159.8
+    assert ar["goat_production"] == 159.8
     # Part-timer: 400 runs and 8 wickets are neither a batting nor a
     # bowling career -- fielding is all that counts.
     part = cricsheet._career_of(
@@ -518,6 +526,82 @@ def test_role_gates_production_disciplines():
     assert tiny["goat_production"] == round(
         w["wickets_per_50"] * 30 / 50, 1)                    # 9.6
     assert tiny["goat_production"] == 9.6
+
+
+def test_era_pars_and_strike_rate_premium():
+    """Both rate bonuses follow the ERA: the par is the league rate of
+    the seasons the career actually spanned, ball-weighted by his own
+    balls -- never one fixed number across scoring environments. The
+    strike-rate premium only fires past GOAT_SR_MIN_BALLS, and
+    whatever par the bonus used is what the payload publishes (config
+    fallback included), so every point stays auditable."""
+    w = cricsheet.GOAT_ACCOLADES
+    league = {"econ": {"2019": 8.5, "2024": 9.5},
+              "sr": {"2019": 130.0, "2024": 150.0}}
+
+    def line(year, bb, charged, wkts, runs, balls):
+        return ("p", year), {
+            "name": "Era", "team": "Alpha",
+            "batting": {"inns": 1, "runs": runs, "balls": balls,
+                        "hs": runs, "not_outs": 0, "fours": 0,
+                        "sixes": 0, "fifties": 0, "hundreds": 0},
+            "bowling": {"inns": 1, "balls": bb, "runs": charged,
+                        "wickets": wkts, "four_wkts": 0, "five_wkts": 0,
+                        "best": None},
+            "fielding": {"catches": 0, "stumpings": 0, "run_outs": 0}}
+
+    # Economy, ball-weighted across HIS seasons: 300 overs' balls at a
+    # league-par 8.5 (2019) plus 100 at 9.5 (2024) ->
+    # (8.5*300 + 9.5*100) / 400 = 8.75 an over. He concedes 8.55
+    # (570 off 400 balls), so he earns 6 * (8.75 - 8.55) = 1.2 for
+    # beating HIS era -- on the fixed 8.5 par he would have banked a
+    # far larger (wrong-era) bonus. 45 wickets keeps the 50-wicket
+    # average bonus out, so the pin isolates the economy term:
+    # 16 * 45/50 + 1.2 = 15.6.
+    lines = dict([line(2019, 300, 430, 30, 40, 20),
+                  line(2024, 100, 140, 15, 20, 7)])
+    era = cricsheet._career_of(lines, NO_HONOURS, "p", "Era", league)
+    assert era["role"] == "bowler"
+    assert era["career"]["econ"] == 8.55
+    assert era["career"]["econ_par"] == 8.75
+    assert era["goat_production"] == round(
+        w["wickets_per_50"] * 45 / 50
+        + w["economy_weight"] * (8.75 - 8.55), 1)            # 15.6
+    assert era["goat_production"] == 15.6
+    # Strike rate, same era logic: 600 balls in 2019 (league SR 130)
+    # + 1800 in 2024 (league SR 150) -> par (130*600 + 150*1800)
+    # / 2400 = 145.0. He scores 3660 off 2400 = SR 152.5, past the
+    # 2000-ball qualifier, so the premium pays 0.5 * 7.5 = 3.75:
+    # 12 * 3660/1000 + 3.75 = 47.7.
+    lines = dict([line(2019, 0, 0, 0, 780, 600),
+                  line(2024, 0, 0, 0, 2880, 1800)])
+    rate = cricsheet._career_of(lines, NO_HONOURS, "p", "Rate", league)
+    assert rate["role"] == "batter"
+    assert rate["career"]["sr"] == 152.5
+    assert rate["career"]["sr_par"] == 145.0
+    assert rate["goat_production"] == round(
+        w["runs_per_1000"] * 3660 / 1000
+        + w["sr_weight"] * (152.5 - 145.0), 1)               # 47.7
+    assert rate["goat_production"] == 47.7
+    # Qualifier edge: the SAME rate style on 1999 balls -- one short
+    # of GOAT_SR_MIN_BALLS -- buys NOTHING. Volume still pays; the
+    # rate does not. (SR 151.0 vs par 144.0 would have been +3.5.)
+    lines = dict([line(2019, 0, 0, 0, 780, 600),
+                  line(2024, 0, 0, 0, 2238, 1399)])
+    gated = cricsheet._career_of(lines, NO_HONOURS, "p", "Gated", league)
+    assert gated["career"]["balls"] == 1999
+    assert gated["career"]["sr"] == 151.0
+    assert gated["career"]["sr_par"] == 144.0
+    assert gated["goat_production"] == round(
+        w["runs_per_1000"] * 3018 / 1000, 1)                 # 36.2
+    assert gated["goat_production"] == 36.2
+    # No league rates at all (a test build, a stale build): the
+    # config fallbacks apply AND publish -- what the bonus used.
+    bare = cricsheet._career_of(
+        _flat_line("Bare", runs=3000, balls=2400, catches=1),
+        NO_HONOURS, "p", "Bare")
+    assert bare["career"]["sr_par"] == w["sr_par"] == 130.0
+    assert bare["career"]["econ_par"] == w["economy_par"] == 8.5
 
 
 def test_replay_odds_reproducible_and_conservative(zip_path):
@@ -677,6 +761,21 @@ def test_build_writes_attributed_payloads(zip_path, tmp_path):
     assert a1["goat_hardware"] == round(11.5 * factor, 1)   # 99.1
     assert a1["goat_production"] == round(0.1 * factor, 1)  # 0.9
     assert a1["goat"] == 100.0 == index["max"]
+    # The league scoring environment -- the era pars every rate bonus
+    # is measured against -- travels in the payload season by season,
+    # and each player's published par comes from THAT schedule. A1
+    # never bowled, so his economy par is the config fallback (what
+    # the bonus would use is exactly what publishes).
+    rates = players["league_rates"]
+    assert sorted(rates["econ"]) == sorted(rates["sr"]) == ["2023", "2024"]
+    for kind in ("econ", "sr"):
+        for rate in rates[kind].values():
+            assert 0.0 < rate < 300.0         # a real T20 rate
+    assert a1["career"]["econ_par"] == cricsheet.GOAT_ACCOLADES[
+        "economy_par"]
+    if a1["career"]["balls"]:
+        assert min(rates["sr"].values()) <= a1["career"]["sr_par"] \
+            <= max(rates["sr"].values())
     # Role and fielding survive into the payload: A1 is a part-timer
     # (30 runs, under the 1000-run gate), the run out and the stumping
     # landed on bA2 (xxx2), and the caught-and-bowled on the bowler.

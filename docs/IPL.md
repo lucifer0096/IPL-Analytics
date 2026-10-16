@@ -105,8 +105,9 @@ GOAT = HARDWARE                  (what the official record says he won)
      +  2.5 x player-of-the-match awards (official, counted once)
      + PRODUCTION                (role-gated output + fielding, below)
      + 12.0 x (runs / 1000)          batters and all-rounders only
+     +  0.5 x max(0, SR - era SR)    same role, 2000+ balls faced
      + 16.0 x (wickets / 50)         bowlers and all-rounders only
-     +  6.0 x max(0, 8.5 - economy)  bowlers, 20+ overs bowled
+     +  6.0 x max(0, era econ - economy)  bowlers, 20+ overs bowled
      +  3.0 x max(0, 28 - average)   bowlers, 50+ wickets
      +  2.0 per four-for  +  4.0 per five-for   (per innings bowled)
      +  0.15 x catches + 0.3 x stumpings + 0.3 x run outs  (everyone)
@@ -119,9 +120,24 @@ both makes a part-timer (scored on fielding only). Nobody is judged on
 a discipline he never practised as a job: Kohli's four career wickets
 at a 92.0 average are not a bowling record, Malinga's 88 runs are not
 a batting record, and Jadeja is paid for batting, bowling and catching
-alike. The economy bonus needs 20 overs bowled and the average bonus
-needs 50 wickets, so one good spell (or one bad one) cannot decide a
-career rate.
+alike. The economy bonus needs 20 overs bowled, the strike-rate
+premium 2000 balls faced and the average bonus needs 50 wickets, so
+one good spell (or one bad one) cannot decide a career rate.
+
+**Era pars.** Scoring environments are not stationary: in this record
+the league economy ran from 7.3 to 9.8 an over and the league strike
+rate from 117 to 157. So the two rates that swing with the era are
+measured against the era. The economy par is the league economy of the
+seasons a bowler actually bowled in, weighted by his own balls
+(Bumrah's par is 8.54 against his 7.34; Malinga's 7.84 against his
+7.14), and the strike-rate par the league strike rate of the seasons a
+batter actually batted in (AB de Villiers' par is 128.7 against his
+152.4 -- impact rate finally counts, which is where he sits on the
+published lists). The bowling-average bonus keeps its published fixed
+par of 28. Whichever par a bonus used publishes on the player
+(`career.econ_par`, `career.sr_par`) and the whole per-season league
+schedule ships in the payload as `league_rates`, so every rate point
+is traceable to the matches it came from.
 
 **The rating is a 0-100 index.** Raw points from the two blocks are
 rescaled by one factor -- `GOAT_INDEX_MAX / the raw leader's score`,
@@ -132,13 +148,17 @@ keeping Hardware + Production equal to GOAT on screen.
 **Calibration against published lists.** The weights were fixed
 against three published all-time top tens (ipl.com Aug 2026,
 CricketWinner Jul 2026, SportsboardIndia Feb 2026) by Spearman rank
-correlation over their combined order: the role-gated, fielding-aware
-config scores +0.65, up from +0.59 for the previous run/wicket-only
-blend and +0.56 for the original hardware-led config. On this dataset
-it ranks Kohli, Jadeja, Dhoni, Narine and Rohit on top, with Bhuvneshwar
-Kumar, Malinga, Chahal and Bumrah all inside the top 15 (wicket-taking
-careers are no longer buried under run-scorers) and hardware-heavy
-candidates such as Ambati Rayudu outside the top 20.
+correlation over their combined order: the current config (role
+gating, fielding credit, era pars and the strike-rate premium) scores
++0.66, up from +0.65 for the role-gated config before the era terms,
++0.59 for the run/wicket-only blend and +0.56 for the original
+hardware-led config. On this dataset it ranks Kohli, Jadeja, Dhoni,
+Narine and Rohit on top, with Bhuvneshwar Kumar (#11), Malinga (#15),
+Chahal (#12) and Bumrah (#14) all inside the top 15 (wicket-taking
+careers are no longer buried under run-scorers), AB de Villiers at #7
+-- the 4th-10th range the published lists place him in -- and
+hardware-heavy candidates such as Ambati Rayudu outside the top 20
+(#23).
 
 Four honesty rules the rankings tab prints:
 
@@ -162,9 +182,11 @@ headshots are other people's copyright -- so the Journey tab draws a
 trading-card style player card instead: the player's initials on a
 gradient in his last team's brand colours (a stable hash-derived hue
 for anything unlisted), his season span, last team and career role,
-and every published number as chips: career (runs, wickets, catches,
-stumpings, run outs, economy, average), hardware counts, ladder and
-the GOAT blend with both subtotals spelled out on the card.
+and every published number as chips: career (runs, strike rate,
+wickets, catches, stumpings, run outs, economy, average -- each rate
+printed with the era par it is scored against), hardware counts,
+ladder and the GOAT blend with both subtotals spelled out on the
+card.
 
 ### Season Replay (TOY model, labelled as such)
 

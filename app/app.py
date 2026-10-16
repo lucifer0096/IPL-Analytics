@@ -225,11 +225,23 @@ def player_card(p: dict) -> str:
         ("HS", str(car.get("hs", 0))),
         ("Wkts", str(car.get("wickets", 0))),
     ]
+    # Rates print WITH the par they are measured against (era par of
+    # his own seasons), so the bonus behind the GOAT score is visible
+    # right where the rate is. A build from before the era pars simply
+    # omits the par -- never a fabricated one.
+    if car.get("sr") is not None:
+        sr = str(car["sr"])
+        if car.get("sr_par") is not None:
+            sr += f" (par {car['sr_par']})"
+        chips.append(("SR", sr))
     best = car.get("best") or [0, 0]
     if car.get("balls_bowled"):
         chips.append(("Best", f"{best[0]}/{best[1]}"))
         if car.get("econ") is not None:
-            chips.append(("Econ", str(car["econ"])))
+            econ = str(car["econ"])
+            if car.get("econ_par") is not None:
+                econ += f" (par {car['econ_par']})"
+            chips.append(("Econ", econ))
         if car.get("bowl_avg") is not None:
             chips.append(("Avg", str(car["bowl_avg"])))
     if (car.get("catches") or car.get("stumpings")
@@ -932,6 +944,18 @@ with tab_goat:
             if goat_index else
             "These are raw GOAT points; this build predates the "
             "0-100 index rescale. ")
+        # Why the rate pars are per-ERA, in this record's own numbers:
+        # the league schedule ships in league_rates for audit.
+        lrates = players_doc.get("league_rates") or {}
+        econs = sorted((lrates.get("econ") or {}).values())
+        srs = sorted((lrates.get("sr") or {}).values())
+        era_line = (
+            f"This matters because league scoring itself swung across "
+            f"the record: economy {econs[0]:.1f} to {econs[-1]:.1f} an "
+            f"over and strike rate {srs[0]:.0f} to {srs[-1]:.0f}. One "
+            "fixed par would pay early-era bowlers for being ordinary "
+            "and deny modern ones for being a run above theirs. "
+            if econs and srs else "")
         st.caption(
             index_line +
             "Two auditable components, one published config "
@@ -949,18 +973,24 @@ with tab_goat:
             "PRODUCTION is ROLE-GATED -- nobody is judged on a "
             "discipline he never played. Batters and all-rounders "
             "(1000+ career runs) score "
-            f"{goat_weights.get('runs_per_1000', 12.0)} per 1000 runs; "
-            "bowlers and all-rounders (30+ career wickets) score "
+            f"{goat_weights.get('runs_per_1000', 12.0)} per 1000 runs "
+            "PLUS a scoring-rate premium: "
+            f"{goat_weights.get('sr_weight', 0.5)} per strike-rate "
+            "point above the league strike rate of the seasons HE "
+            "batted (2000+ balls faced), because impact batting is "
+            "rate as well as volume. "
+            "Bowlers and all-rounders (30+ career wickets) score "
             f"{goat_weights.get('wickets_per_50', 16.0)} per 50 wickets "
-            "plus a quality bonus: "
-            f"{goat_weights.get('economy_weight', 6.0)} per run/over "
-            f"under the {goat_weights.get('economy_par', 8.5)} par "
-            "economy (20+ overs bowled) and "
+            "plus quality bonuses measured against HIS ERA, not one "
+            f"fixed number: {goat_weights.get('economy_weight', 6.0)} "
+            "per run/over under the league economy of the seasons HE "
+            "bowled (ball-weighted, 20+ overs bowled) and "
             f"{goat_weights.get('average_weight', 3.0)} per run under "
             f"the {goat_weights.get('average_par', 28.0)} par average "
             "(50+ wickets), plus "
             f"{goat_weights.get('four_wkts', 2.0)} per four-for and "
             f"{goat_weights.get('five_wkts', 4.0)} per five-for. "
+            + era_line +
             "Fielding counts for EVERYONE: "
             f"{goat_weights.get('catch', 0.15)} per catch, "
             f"{goat_weights.get('stumping', 0.3)} per stumping, "
@@ -1098,6 +1128,10 @@ with tab_compare:
                     ("Batting strike rate",
                      (round(100.0 * c["runs"] / c["balls"], 1)
                       if c["balls"] else "-")),
+                    ("Strike rate vs era par",
+                     (f"{c.get('sr')} / {c.get('sr_par')}"
+                      if c.get("sr") is not None
+                      and c.get("sr_par") is not None else "-")),
                     ("Fifties / hundreds",
                      f"{c['fifties']} / {c['hundreds']}"),
                     ("Wickets", c["wickets"]),
@@ -1106,6 +1140,10 @@ with tab_compare:
                       if c.get("best") else "-")),
                     ("Economy (career)",
                      c.get("econ") if c.get("econ") is not None else "-"),
+                    ("Economy vs era par",
+                     (f"{c.get('econ')} / {c.get('econ_par')}"
+                      if c.get("econ") is not None
+                      and c.get("econ_par") is not None else "-")),
                     ("Bowling average",
                      (c.get("bowl_avg")
                       if c.get("bowl_avg") is not None else "-")),

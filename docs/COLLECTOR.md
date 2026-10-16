@@ -24,7 +24,7 @@ python src/collector/cricsheet.py --out DIR    # write elsewhere
 | File | Contents |
 | --- | --- |
 | `data/ipl_seasons.json` | source, generated-utc stamp, meta counts, `team_aliases`, `venue_aliases`, per season: champion, points table (league phase), fixtures (incl. the decisive `winner`; ties/no-results are None), phase splits per team, Orange/Purple Cap tables, formula XI + MVP, replay odds; all-time `h2h`; the `backtest` (prior-season strengths vs real playoffs) |
-| `data/ipl_players.json` | source, stamp, `ladder_weights` + `goat_weights`, `goat_index` (max / leader / raw), registry-keyed players: per-season lines (team, batting, bowling incl. hauls, fielding), career totals incl. economy, bowling average, catches/stumpings/run outs, the role derived from the career gates, PoM, titles, runner-ups, Orange/Purple Caps, ladder score, GOAT score with `goat_hardware` + `goat_production` subtotals |
+| `data/ipl_players.json` | source, stamp, `ladder_weights` + `goat_weights`, `goat_index` (max / leader / raw), `league_rates` (per-season league economy and strike rate, the era-par schedule), registry-keyed players: per-season lines (team, batting, bowling incl. hauls, fielding), career totals incl. strike rate, economy, bowling average, catches/stumpings/run outs, the era pars the rate bonuses used (`econ_par`, `sr_par`), the role derived from the career gates, PoM, titles, runner-ups, Orange/Purple Caps, ladder score, GOAT score with `goat_hardware` + `goat_production` subtotals |
 
 Both are committed because Streamlit Cloud cannot run the collector; the
 app reads only these files and stamps their `_generated_utc` in the
@@ -57,8 +57,15 @@ sidebar.
    replays per season, predicted top four vs the real playoff teams.
 9. `_career_of` -- per-player totals, the published ladder score, the
    role gate (1000 runs / 30 wickets) and the role-gated GOAT blocks
-   (weights in `GOAT_ACCOLADES`); `build()` then rescales both blocks
-   onto the 0-100 index.
+   (weights in `GOAT_ACCOLADES`), each rate bonus measured against the
+   era: `build()` first sums each season's league economy (charged
+   runs / legal balls) and strike rate (batter runs / legal balls)
+   from the same innings and publishes them as `league_rates`, and
+   `_career_of` ball-weights those into the player's own `econ_par`
+   and `sr_par` -- the config fallback applies when a career spans no
+   league seasons (tests, stale builds) and whatever par was used
+   publishes in the payload; `build()` then rescales both blocks onto
+   the 0-100 index.
    Phase splits are summed per team per season along the way; venue and
    team label merges (`VENUE_ALIASES`, `TEAM_ALIASES`) are carried
    through so all-time views join on one canonical name.

@@ -23,7 +23,7 @@ silent the UI says so.
 | Head-to-Head | All-history rivalries (franchise renames merged), most-played pairings |
 | Franchises | A franchise's whole arc: every season's league position and finish, title timeline, era names, all-time record vs each opponent |
 | Records & Ladder | The season's formula XI + MVP, Orange/Purple Caps, the published-weights all-time ladder, and the milestone gaps active players are sitting on |
-| GOAT Rankings | All-time rankings blending **hardware** (titles, finals lost, Orange/Purple Caps, official player-of-the-match awards) with **production** (career runs/wickets at the ladder's rates), both subtotals shown |
+| GOAT Rankings | All-time rankings blending **hardware** (titles, finals lost, Orange/Purple Caps, official player-of-the-match awards) with **production** (career runs/wickets, an era-par strike-rate premium and economy bonuses parred to the seasons he played), both subtotals shown |
 | Player Journey | A player card (generated initials avatar on his last team's colours, career + accolades + GOAT blend) and every season he took the field: teams across eras, runs, wickets, the whole career line |
 | Compare | Two players side by side: career metrics, honours, the GOAT sum per column, and runs/wickets by season overlaid |
 | Season Replay | A transparent toy model: replay every league match 5,000 times from seed, playoff and title odds -- plus a backtest of the same model seeded ONLY from the prior season's NRR, scored against the real playoff teams |
@@ -41,7 +41,8 @@ silent the UI says so.
   and the MVP all run off `GOAT_WEIGHTS` in
   `src/collector/cricsheet.py`; the GOAT Rankings tab runs off
   `GOAT_ACCOLADES` (a hardware block plus a ROLE-GATED production
-  block -- batters on runs, bowlers on wickets + economy + average +
+  block -- batters on runs + a strike-rate premium over his era's
+  rate, bowlers on wickets + economy parred to his own era + average +
   hauls, everyone on catches, stumpings and run outs -- reported as
   two columns that sum to the score, rescaled onto a 0-100 index).
   Change a config, everything recomputes, the tests pin the schema.

@@ -146,6 +146,12 @@ def test_goat_rankings_blend_hardware_and_production():
     text = _text(at)
     assert "0-100 INDEX" in text                 # the rescale is stated
     assert "ROLE-GATED" in text                  # the gating is stated
+    # The era mechanism is stated too: the rate bonuses are measured
+    # against the league of the seasons HE played, and the caption
+    # quotes this record's own economy / strike-rate swing as evidence.
+    assert "strike-rate" in text                 # batting-rate premium
+    assert "HIS ERA" in text                     # bowling pars follow era
+    assert "league scoring itself swung" in text
     assert "V Kohli" in text
 
 
@@ -237,6 +243,13 @@ def test_compare_tab_puts_careers_side_by_side():
         prod = float(pair[col][
             pair["Metric"] == "GOAT production"].iloc[0])
         assert abs(total - (hw + prod)) < 0.05
+    # The era-par rows: Kohli's rates print against the par they are
+    # scored on; Dhoni's economy stays an honest dash -- he has no
+    # legal balls bowled, so the config fallback par must NOT dress a
+    # non-bowler up as a bowler.
+    assert by["Strike rate vs era par"][1] == "138.2 / 130.6"
+    assert by["Economy vs era par"][0] == "8.8 / 7.72"
+    assert by["Economy vs era par"][1] == "-"
     # both season overlays joined the standing three charts (H2H bar,
     # GOAT stack, replay bar)
     charts = {c.key for c in at.get("plotly_chart")}
@@ -319,6 +332,11 @@ def test_player_journey_renders_after_selection():
     # breakdown line (only the card spells the two subtotals out).
     assert ">MD</div>" in text
     assert " hardware + " in text
+    # The card prints the rate WITH its era par -- the audit for the
+    # GOAT rate bonuses, right where the rate sits (committed-data
+    # pin: Dhoni's career 2008-2024, SR 138.2 against the league SR
+    # of the seasons he played, 130.6).
+    assert "SR 138.2 (par 130.6)" in text
 
 
 def test_stale_data_without_goat_field_is_an_honest_error(monkeypatch):
